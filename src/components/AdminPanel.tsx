@@ -3,7 +3,7 @@ import {
   Shield, Key, LogOut, Package, ShoppingBag, Terminal, Edit3, Trash2, Plus, 
   AlertCircle, RefreshCw, X, MessageSquare, UserPlus, Store, Lock, CheckCircle,
   BarChart3, DollarSign, TrendingUp, AlertTriangle, Printer, Wallet, Award, FileText,
-  Moon, Sun, ChefHat, Box, Truck, Tag, Star, Download, MapPin, Camera, BookOpen
+  Moon, Sun, ChefHat, Box, Truck, Tag, Star, Download, MapPin, Camera, BookOpen, Users
 } from 'lucide-react';
 import { db } from '../db/supabaseClient';
 import type { 
@@ -32,7 +32,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const [isLoading, setIsLoading] = useState(false);
 
   // Tab & Operational States
-  const [activeTab, setActiveTab] = useState<'orders' | 'products' | 'analytics' | 'expenses' | 'coupons' | 'reviews' | 'security' | 'chatbot' | 'dapur' | 'packaging' | 'kurir'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'products' | 'analytics' | 'expenses' | 'coupons' | 'reviews' | 'staff' | 'security' | 'chatbot' | 'dapur' | 'packaging' | 'kurir'>('orders');
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [newStaffUsername, setNewStaffUsername] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState<UserRole>('pegawai');
+  const [newStaffDivision, setNewStaffDivision] = useState<StaffDivision>('kasir');
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderFilter, setOrderFilter] = useState<'Semua' | OrderStatus>('Semua');
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -239,6 +245,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
       fetchAdminData(token);
     } catch (err: any) {
       alert(`Gagal memperbarui stok: ${err.message}`);
+    }
+  };
+
+  // Staff Management Handlers
+  const handleAddStaffAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStaffUsername.trim() || !newStaffName.trim() || !newStaffPassword.trim()) {
+      alert('Semua kolom akun staf wajib diisi!');
+      return;
+    }
+    try {
+      await db.createStaffAccount({
+        username: newStaffUsername,
+        name: newStaffName,
+        password: newStaffPassword,
+        role: newStaffRole,
+        division: newStaffDivision
+      }, token);
+
+      setShowAddStaffModal(false);
+      setNewStaffUsername('');
+      setNewStaffName('');
+      setNewStaffPassword('');
+      await fetchAdminData(token);
+      alert('Akun staf berhasil dibuat!');
+    } catch (err: any) {
+      alert(`Gagal membuat akun staf: ${err.message}`);
+    }
+  };
+
+  const handleDeleteStaffAccount = async (id: string, staffName: string) => {
+    if (!window.confirm(`Apakah Anda yakin ingin menghapus akun staf "${staffName}"?`)) return;
+    try {
+      await db.deleteStaffAccount(id, token);
+      await fetchAdminData(token);
+    } catch (err: any) {
+      alert(`Gagal menghapus akun: ${err.message}`);
     }
   };
 
@@ -535,7 +578,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               <button onClick={() => setActiveTab('expenses')} className={`btn-secondary`} style={{ padding: '8px 14px', fontSize: '0.85rem', backgroundColor: activeTab === 'expenses' ? 'var(--color-primary)' : 'transparent', color: activeTab === 'expenses' ? 'white' : 'inherit' }}><Wallet size={16} /> Pengeluaran</button>
               <button onClick={() => setActiveTab('coupons')} className={`btn-secondary`} style={{ padding: '8px 14px', fontSize: '0.85rem', backgroundColor: activeTab === 'coupons' ? 'var(--color-primary)' : 'transparent', color: activeTab === 'coupons' ? 'white' : 'inherit' }}><Tag size={16} /> Promo & Voucher</button>
               <button onClick={() => setActiveTab('reviews')} className={`btn-secondary`} style={{ padding: '8px 14px', fontSize: '0.85rem', backgroundColor: activeTab === 'reviews' ? 'var(--color-primary)' : 'transparent', color: activeTab === 'reviews' ? 'white' : 'inherit' }}><Star size={16} /> Rating Pelanggan</button>
-              <button onClick={() => setActiveTab('security')} className={`btn-secondary`} style={{ padding: '8px 14px', fontSize: '0.85rem', backgroundColor: activeTab === 'security' ? 'var(--color-primary)' : 'transparent', color: activeTab === 'security' ? 'white' : 'inherit' }}><Terminal size={16} /> Staf & Audit</button>
+              <button onClick={() => setActiveTab('staff')} className={`btn-secondary`} style={{ padding: '8px 14px', fontSize: '0.85rem', backgroundColor: activeTab === 'staff' ? 'var(--color-primary)' : 'transparent', color: activeTab === 'staff' ? 'white' : 'inherit' }}><Users size={16} /> Kelola Staf & Pegawai</button>
+              <button onClick={() => setActiveTab('security')} className={`btn-secondary`} style={{ padding: '8px 14px', fontSize: '0.85rem', backgroundColor: activeTab === 'security' ? 'var(--color-primary)' : 'transparent', color: activeTab === 'security' ? 'white' : 'inherit' }}><Terminal size={16} /> Log Audit & Keamanan</button>
             </>
           )}
 
@@ -798,23 +842,62 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             </div>
           )}
 
-          {/* TAB ANALYTICS & LAPORAN */}
-          {activeTab === 'analytics' && (
+          {/* TAB MANAJEMEN STAF & PEGAWAI */}
+          {activeTab === 'staff' && (
             <div>
-              <h3 style={{ margin: '0 0 16px' }}>Ringkasan Eksekutif Keuangan UMKM</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-                <div style={{ border: '1px solid var(--color-border)', padding: '16px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Total Omzet</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 'bold', color: 'var(--color-primary)' }}>Rp{totalRevenue.toLocaleString()}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.3rem', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users size={22} style={{ color: 'var(--color-primary)' }} /> Direktori & Pengelolaan Akun Staf Pegawai ({staffAccounts.length})
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+                    Tambah, hapus, dan atur penugasan divisi operasional untuk setiap staf pegawai toko
+                  </p>
                 </div>
-                <div style={{ border: '1px solid var(--color-border)', padding: '16px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Total Pengeluaran</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 'bold', color: '#D9534F' }}>Rp{totalExpensesAmount.toLocaleString()}</div>
-                </div>
-                <div style={{ border: '1px solid var(--color-border)', padding: '16px', borderRadius: '8px', backgroundColor: netProfit >= 0 ? '#E8F5E9' : '#FDEDEC' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Estimasi Laba Bersih</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 'bold', color: netProfit >= 0 ? '#2E7D32' : '#D9534F' }}>Rp{netProfit.toLocaleString()}</div>
-                </div>
+                <button onClick={() => setShowAddStaffModal(true)} className="btn-primary" style={{ fontSize: '0.85rem', padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <UserPlus size={16} /> Tambah Akun Pegawai Baru
+                </button>
+              </div>
+
+              <div style={{ border: '1px solid var(--color-border)', borderRadius: '10px', overflow: 'hidden', backgroundColor: darkMode ? '#2A2A2A' : '#FFFDF9' }}>
+                <table style={{ width: '100%', fontSize: '0.88rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: 'var(--color-primary)', color: 'white', textAlign: 'left' }}>
+                      <th style={{ padding: '12px' }}>Nama Lengkap Staf</th>
+                      <th style={{ padding: '12px' }}>Username</th>
+                      <th style={{ padding: '12px' }}>Peran (Role)</th>
+                      <th style={{ padding: '12px' }}>Divisi Kerja</th>
+                      <th style={{ padding: '12px', textAlign: 'center' }}>Tindakan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {staffAccounts.map((acc) => (
+                      <tr key={acc.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td style={{ padding: '12px' }}><strong>{acc.name}</strong></td>
+                        <td style={{ padding: '12px' }}><code style={{ fontWeight: 'bold' }}>{acc.username}</code></td>
+                        <td style={{ padding: '12px' }}>
+                          <span style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: acc.role === 'admin' ? '#FADBD8' : '#D4E6F1', color: acc.role === 'admin' ? '#78281F' : '#1B4F72' }}>
+                            {acc.role.toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span style={{ fontSize: '0.78rem', padding: '4px 10px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: acc.division === 'dapur' ? '#FFE0B2' : acc.division === 'packaging' ? '#E1BEE7' : acc.division === 'kurir' ? '#C8E6C9' : '#E3F2FD', color: acc.division === 'dapur' ? '#E65100' : acc.division === 'packaging' ? '#8E24AA' : acc.division === 'kurir' ? '#2E7D32' : '#0288D1' }}>
+                            {acc.division === 'dapur' ? '🍳 Dapur Produksi' : acc.division === 'packaging' ? '📦 Packaging Gudang' : acc.division === 'kurir' ? '🛵 Kurir Delivery' : acc.division === 'kasir' ? '💬 Kasir & CS' : '👑 Owner Admin'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          {acc.username !== 'admin' ? (
+                            <button onClick={() => handleDeleteStaffAccount(acc.id, acc.name)} style={{ background: 'none', border: 'none', color: '#D9534F', cursor: 'pointer' }}>
+                              <Trash2 size={16} />
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Akun Utama</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -902,18 +985,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
         </div>
       )}
 
-      {/* MODAL BUAT VOUCHER */}
-      {showCouponModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div className="premium-card" style={{ width: '100%', maxWidth: '400px', padding: '24px', textAlign: 'left' }}>
-            <h3 style={{ margin: '0 0 12px' }}>Buat Kode Voucher Baru</h3>
-            <form onSubmit={handleSaveCoupon} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input type="text" className="form-input" placeholder="Kode Voucher (misal: SAKO15)" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} required />
-              <input type="number" className="form-input" placeholder="Diskon (%)" value={couponPercent} onChange={(e) => setCouponPercent(Number(e.target.value))} required />
-              <input type="number" className="form-input" placeholder="Maks. Potongan (Rp)" value={couponMaxDisc} onChange={(e) => setCouponMaxDisc(Number(e.target.value))} required />
-              <input type="number" className="form-input" placeholder="Min. Belanja (Rp)" value={couponMinOrder} onChange={(e) => setCouponMinOrder(Number(e.target.value))} required />
-              <button type="submit" className="btn-primary" style={{ justifyContent: 'center', padding: '10px' }}>Simpan Voucher</button>
-              <button type="button" onClick={() => setShowCouponModal(false)} className="btn-outline" style={{ justifyContent: 'center', padding: '8px' }}>Batal</button>
+      {/* MODAL TAMBAH AKUN PEGAWAI BARU */}
+      {showAddStaffModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="premium-card" style={{ width: '100%', maxWidth: '440px', padding: '24px', textAlign: 'left', backgroundColor: darkMode ? '#1E1E1E' : '#FFF' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <UserPlus size={20} /> Tambah Akun Pegawai Baru
+              </h3>
+              <button onClick={() => setShowAddStaffModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleAddStaffAccount} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Nama Lengkap Staf</label>
+                <input type="text" className="form-input" placeholder="contoh: Chef Ani (Staf Dapur)" value={newStaffName} onChange={(e) => setNewStaffName(e.target.value)} required />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Username Pengguna</label>
+                <input type="text" className="form-input" placeholder="contoh: chef_ani" value={newStaffUsername} onChange={(e) => setNewStaffUsername(e.target.value)} required />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Kata Sandi (Password)</label>
+                <input type="password" className="form-input" placeholder="Masukkan kata sandi staf" value={newStaffPassword} onChange={(e) => setNewStaffPassword(e.target.value)} required />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Peran Utama (Role)</label>
+                <select className="form-input" value={newStaffRole} onChange={(e) => setNewStaffRole(e.target.value as UserRole)}>
+                  <option value="pegawai">Pegawai (Staf Operasional)</option>
+                  <option value="admin">Administrator (Owner Full Access)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Divisi Kerja (Tampilan Layar)</label>
+                <select className="form-input" value={newStaffDivision} onChange={(e) => setNewStaffDivision(e.target.value as StaffDivision)}>
+                  <option value="kasir">💬 Kasir & Customer Service</option>
+                  <option value="dapur">🍳 Dapur & Produksi Kue</option>
+                  <option value="packaging">📦 Packaging & Gudang</option>
+                  <option value="kurir">🛵 Kurir Delivery Paket</option>
+                  <option value="admin">👑 Administrator (Owner)</option>
+                </select>
+              </div>
+
+              <button type="submit" className="btn-primary" style={{ justifyContent: 'center', padding: '10px', marginTop: '6px' }}>
+                Simpan & Buat Akun Pegawai
+              </button>
             </form>
           </div>
         </div>
