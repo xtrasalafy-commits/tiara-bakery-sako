@@ -172,15 +172,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  const handleQuickLogin = (rolePreset: 'admin' | 'pegawai') => {
-    if (rolePreset === 'admin') {
-      setUsername('admin');
-      setPassword('adminTiara123!');
-    } else {
-      setUsername('pegawai');
-      setPassword('pegawaiTiara123!');
-    }
-  };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
@@ -518,54 +509,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             </div>
             <h2 style={{ fontSize: '1.6rem', marginBottom: '6px' }}>Portal Masuk Pengelola</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-              TIARA BAKERY SAKO • Analitik & Sistem Manajemen UMKM
+              TIARA BAKERY SAKO • Sistem Manajemen & Operasional Toko
             </p>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin')}
-              style={{
-                padding: '10px',
-                fontSize: '0.8rem',
-                borderRadius: '8px',
-                border: '1px solid var(--color-primary)',
-                backgroundColor: username === 'admin' ? 'var(--color-primary)' : 'transparent',
-                color: username === 'admin' ? 'white' : 'var(--color-primary)',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              👑 Login Admin
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('pegawai')}
-              style={{
-                padding: '10px',
-                fontSize: '0.8rem',
-                borderRadius: '8px',
-                border: '1px solid #0288D1',
-                backgroundColor: username === 'pegawai' ? '#0288D1' : 'transparent',
-                color: username === 'pegawai' ? 'white' : '#0288D1',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              👨‍🍳 Login Pegawai
-            </button>
           </div>
 
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div>
               <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-dark)', display: 'block', marginBottom: '4px' }}>
-                Username Pengguna
+                Username
               </label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="Masukkan username (admin / pegawai)"
+                placeholder="Masukkan username anda"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
@@ -579,7 +535,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               <input
                 type="password"
                 className="form-input"
-                placeholder="Masukkan kata sandi"
+                placeholder="Masukkan kata sandi anda"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -594,16 +550,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             )}
 
             <button type="submit" disabled={isLoading} className="btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '1rem' }}>
-              {isLoading ? 'Memverifikasi...' : <>Masuk Sistem UMKM <Key size={16} /></>}
+              {isLoading ? 'Memverifikasi...' : <>Masuk Sistem <Key size={16} /></>}
             </button>
           </form>
           
-          <div style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--color-text-muted)', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
-            <p style={{ fontWeight: 'bold', marginBottom: '4px' }}>🔑 Kredensial Pengujian:</p>
-            <ul style={{ paddingLeft: '16px', margin: 0 }}>
-              <li><strong>Admin (Owner)</strong>: <code>admin</code> / <code>adminTiara123!</code></li>
-              <li><strong>Pegawai (Kasir)</strong>: <code>pegawai</code> / <code>pegawaiTiara123!</code></li>
-            </ul>
+          <div style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--color-text-muted)', borderTop: '1px solid var(--color-border)', paddingTop: '16px', lineHeight: '1.5' }}>
+            🔒 <strong>Otentikasi Berbasis Peran:</strong> Masuk dengan username & password Anda. Sistem akan secara otomatis mengarahkan ke Dasbor Admin (Owner) atau Dasbor Pegawai (Kasir) sesuai dengan peran akun Anda.
           </div>
 
         </div>
