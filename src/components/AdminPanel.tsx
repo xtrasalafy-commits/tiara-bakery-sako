@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Key, LogOut, Package, ShoppingBag, Terminal, Edit3, Trash2, Plus, AlertCircle, RefreshCw, CheckCircle, X, MessageSquare } from 'lucide-react';
+import { 
+  Shield, Key, LogOut, Package, ShoppingBag, Terminal, Edit3, Trash2, Plus, 
+  AlertCircle, RefreshCw, X, MessageSquare, UserPlus, Store, Lock 
+} from 'lucide-react';
 import { db } from '../db/supabaseClient';
-import type { Product, Order, ChatbotKnowledge } from '../db/supabaseClient';
+import type { Product, Order, ChatbotKnowledge, UserRole, UserAccount } from '../db/supabaseClient';
 
 interface AdminPanelProps {
   products: Product[];
@@ -9,16 +12,32 @@ interface AdminPanelProps {
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProducts }) => {
+  // Authentication & Role State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [token, setToken] = useState('');
+  const [userRole, setUserRole] = useState<UserRole>('admin');
+  const [userDisplayName, setUserDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
-  
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Tab & Operational States
   const [activeTab, setActiveTab] = useState<'orders' | 'products' | 'security' | 'chatbot'>('orders');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [orderFilter, setOrderFilter] = useState<'Semua' | 'Pending' | 'Diproses' | 'Selesai'>('Semua');
   const [securityLogs, setSecurityLogs] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [staffAccounts, setStaffAccounts] = useState<UserAccount[]>([]);
+
+  // State POS Kasir Modal (Buat Pesanan Langsung di Toko)
+  const [showPosModal, setShowPosModal] = useState(false);
+  const [posCustomerName, setPosCustomerName] = useState('Pelanggan Toko (Walk-in)');
+  const [posCustomerPhone, setPosCustomerPhone] = useState('081234567890');
+  const [posDeliveryMethod, setPosDeliveryMethod] = useState<'Ambil Sendiri' | 'Kirim ke Rumah'>('Ambil Sendiri');
+  const [posAddress, setPosAddress] = useState('');
+  const [posCart, setPosCart] = useState<{ product_id: string; quantity: number }[]>([]);
+  const [posError, setPosError] = useState('');
+  const [posSuccess, setPosSuccess] = useState('');
 
   // State CRUD Produk
   const [showProductModal, setShowProductModal] = useState(false);
@@ -31,18 +50,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const [prodImage, setProdImage] = useState('');
   const [crudError, setCrudError] = useState('');
 
-  // State Chatbot
-
+  // State Chatbot Settings & FAQ
   const [chatbotKnowledge, setChatbotKnowledge] = useState<ChatbotKnowledge[]>([]);
   const [isSavingBotSettings, setIsSavingBotSettings] = useState(false);
   const [botSettingsSuccess, setBotSettingsSuccess] = useState('');
-
-  // State Form Chatbot Settings
   const [botNameInput, setBotNameInput] = useState('');
   const [welcomeMessageInput, setWelcomeMessageInput] = useState('');
   const [defaultFallbackInput, setDefaultFallbackInput] = useState('');
-  
-  // State CRUD FAQ
+
+  // State FAQ CRUD
   const [showFaqModal, setShowFaqModal] = useState(false);
   const [editFaq, setEditFaq] = useState<ChatbotKnowledge | null>(null);
   const [faqKeyword, setFaqKeyword] = useState('');
@@ -50,27 +66,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const [faqAnswer, setFaqAnswer] = useState('');
   const [faqError, setFaqError] = useState('');
 
-  // Sesi Persisten Sederhana untuk kenyamanan demo
+  // State Tambah Staf Baru (Khusus Admin)
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [newStaffUsername, setNewStaffUsername] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState<UserRole>('pegawai');
+  const [staffError, setStaffError] = useState('');
+
+  // Sesi Persisten
   useEffect(() => {
     const savedToken = sessionStorage.getItem('tb_admin_token');
+    const savedRole = sessionStorage.getItem('tb_admin_role') as UserRole | null;
+    const savedName = sessionStorage.getItem('tb_admin_name');
     if (savedToken) {
       setToken(savedToken);
+      if (savedRole) setUserRole(savedRole);
+      if (savedName) setUserDisplayName(savedName);
       setIsLoggedIn(true);
     }
   }, []);
 
-  // Fetch Data (Pesanan, Log, Chatbot Config)
+  // Fetch Data Sesuai Peran
   const fetchAdminData = async (activeToken: string) => {
     setIsLoading(true);
     try {
       const fetchedOrders = await db.getOrders(activeToken);
       setOrders(fetchedOrders);
 
-      const logs = await db.getSecurityLogs(activeToken);
-      setSecurityLogs(logs);
+      if (userRole === 'admin' || activeToken.includes('admin')) {
+        const logs = await db.getSecurityLogs(activeToken);
+        setSecurityLogs(logs);
+
+        const accounts = await db.getStaffAccounts(activeToken);
+        setStaffAccounts(accounts);
+      }
 
       const botSettings = await db.getChatbotSettings();
-
       setBotNameInput(botSettings.botName || '');
       setWelcomeMessageInput(botSettings.welcomeMessage || '');
       setDefaultFallbackInput(botSettings.defaultFallback || '');
@@ -78,8 +110,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
       const botKnowledge = await db.getChatbotKnowledge();
       setChatbotKnowledge(botKnowledge);
     } catch (err: any) {
-      console.error(err);
-      handleLogout();
+      console.error('Fetch Admin Data Error:', err);
     } finally {
       setIsLoading(false);
     }
@@ -91,19 +122,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   }, [isLoggedIn, token]);
 
+  // Login Handler
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
     setIsLoading(true);
 
     try {
-      // Panggil login dengan proteksi rate limit simulator di backend/dbSimulator
       const res = await db.adminLogin(username, password);
       
       if (res.success && res.token) {
         setToken(res.token);
+        const role = res.role || (username.toLowerCase().includes('pegawai') ? 'pegawai' : 'admin');
+        const name = res.name || (role === 'admin' ? 'Administrator (Owner)' : 'Staf Operasional / Kasir');
+
+        setUserRole(role);
+        setUserDisplayName(name);
         setIsLoggedIn(true);
+
         sessionStorage.setItem('tb_admin_token', res.token);
+        sessionStorage.setItem('tb_admin_role', role);
+        sessionStorage.setItem('tb_admin_name', name);
+
         setPassword('');
         setLoginError('');
       } else {
@@ -116,23 +156,100 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
+  // Quick Preset Login Handler
+  const handleQuickLogin = (rolePreset: 'admin' | 'pegawai') => {
+    if (rolePreset === 'admin') {
+      setUsername('admin');
+      setPassword('adminTiara123!');
+    } else {
+      setUsername('pegawai');
+      setPassword('pegawaiTiara123!');
+    }
+  };
+
   const handleLogout = () => {
     setIsLoggedIn(false);
     setToken('');
+    setUserRole('admin');
+    setUserDisplayName('');
     sessionStorage.removeItem('tb_admin_token');
+    sessionStorage.removeItem('tb_admin_role');
+    sessionStorage.removeItem('tb_admin_name');
   };
 
+  // Update Status Pesanan
   const handleUpdateStatus = async (orderId: string, status: 'Pending' | 'Diproses' | 'Selesai') => {
     try {
       await db.updateOrderStatus(orderId, status, token);
-      // Refresh orders
       fetchAdminData(token);
     } catch (err: any) {
       alert(`Gagal mengubah status: ${err.message}`);
     }
   };
 
-  // CRUD PRODUK ACTIONS
+  // Quick Update Stok Produk (Dapat diakses Admin & Pegawai)
+  const handleQuickStockUpdate = async (productId: string, newStock: number) => {
+    try {
+      await db.updateProductStock(productId, newStock, token);
+      await refreshProducts();
+      fetchAdminData(token);
+    } catch (err: any) {
+      alert(`Gagal memperbarui stok: ${err.message}`);
+    }
+  };
+
+  // POS Kasir: Tambah/Kurang Item ke Keranjang POS
+  const handlePosAddToCart = (productId: string) => {
+    const existing = posCart.find(i => i.product_id === productId);
+    if (existing) {
+      setPosCart(posCart.map(i => i.product_id === productId ? { ...i, quantity: i.quantity + 1 } : i));
+    } else {
+      setPosCart([...posCart, { product_id: productId, quantity: 1 }]);
+    }
+  };
+
+  const handlePosRemoveFromCart = (productId: string) => {
+    const existing = posCart.find(i => i.product_id === productId);
+    if (existing && existing.quantity > 1) {
+      setPosCart(posCart.map(i => i.product_id === productId ? { ...i, quantity: i.quantity - 1 } : i));
+    } else {
+      setPosCart(posCart.filter(i => i.product_id !== productId));
+    }
+  };
+
+  const handlePosSubmitOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPosError('');
+    setPosSuccess('');
+
+    if (posCart.length === 0) {
+      setPosError('Pilih setidaknya 1 produk untuk checkout POS!');
+      return;
+    }
+
+    try {
+      const newOrder = await db.createOrder({
+        customer_name: posCustomerName || 'Pelanggan Toko',
+        customer_phone: posCustomerPhone || '081234567890',
+        delivery_method: posDeliveryMethod,
+        address: posDeliveryMethod === 'Kirim ke Rumah' ? posAddress : undefined,
+        items: posCart
+      });
+
+      setPosSuccess(`Pesanan POS #${newOrder.id} berhasil dibuat! (Total: Rp${newOrder.total_price.toLocaleString()})`);
+      setPosCart([]);
+      await refreshProducts();
+      await fetchAdminData(token);
+      setTimeout(() => {
+        setPosSuccess('');
+        setShowPosModal(false);
+      }, 2000);
+    } catch (err: any) {
+      setPosError(err.message || 'Gagal membuat pesanan POS.');
+    }
+  };
+
+  // CRUD Produk Actions (Khusus Admin)
   const handleOpenAddModal = () => {
     setEditProduct(null);
     setProdName('');
@@ -160,9 +277,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setCrudError('');
-    
     if (!prodName.trim()) {
-      setCrudError('Nama produk tidak boleh kosong.');
+      setCrudError('Nama produk wajib diisi.');
       return;
     }
 
@@ -191,7 +307,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   };
 
   const handleDeleteProduct = async (id: string) => {
-    if (!window.confirm('Apakah Anda yakin ingin menghapus produk ini?')) return;
+    if (userRole !== 'admin') {
+      alert('Akses Terbatas: Hanya Admin (Owner) yang diperbolehkan menghapus produk.');
+      return;
+    }
+    if (!window.confirm('Apakah Anda yakin ingin menghapus produk ini secara permanen?')) return;
     try {
       await db.deleteProduct(id, token);
       await refreshProducts();
@@ -201,9 +321,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // CHATBOT ACTIONS
+  // Chatbot Settings Handler (Admin Only)
   const handleSaveBotSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (userRole !== 'admin') {
+      alert('Akses Terbatas: Hanya Admin yang dapat mengubah pengaturan chatbot.');
+      return;
+    }
     setIsSavingBotSettings(true);
     setBotSettingsSuccess('');
     try {
@@ -213,7 +337,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
         defaultFallback: defaultFallbackInput
       }, token);
 
-      setBotSettingsSuccess('Pengaturan chatbot berhasil disimpan!');
+      setBotSettingsSuccess('Pengaturan profil Chatbot berhasil disimpan!');
       setTimeout(() => setBotSettingsSuccess(''), 3000);
       await fetchAdminData(token);
     } catch (err: any) {
@@ -223,6 +347,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
+  // FAQ CRUD Handlers (Admin Only for Save/Delete)
   const handleOpenAddFaqModal = () => {
     setEditFaq(null);
     setFaqKeyword('');
@@ -244,9 +369,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const handleSaveFaq = async (e: React.FormEvent) => {
     e.preventDefault();
     setFaqError('');
-
     if (!faqKeyword.trim() || !faqQuestion.trim() || !faqAnswer.trim()) {
-      setFaqError('Semua field FAQ harus diisi.');
+      setFaqError('Semua kolom FAQ harus diisi.');
       return;
     }
 
@@ -271,6 +395,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   };
 
   const handleDeleteFaq = async (id: string) => {
+    if (userRole !== 'admin') {
+      alert('Akses Terbatas: Hanya Admin yang diperbolehkan menghapus FAQ.');
+      return;
+    }
     if (!window.confirm('Apakah Anda yakin ingin menghapus FAQ ini?')) return;
     try {
       await db.deleteChatbotKnowledge(id, token);
@@ -280,41 +408,123 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // 1. TAMPILAN LOGIN FORM (JIKA BELUM LOGIN)
+  // Tambah Staf Baru (Admin Only)
+  const handleAddStaffAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffError('');
+    if (!newStaffUsername.trim() || !newStaffName.trim() || !newStaffPassword.trim()) {
+      setStaffError('Semua kolom wajib diisi!');
+      return;
+    }
+
+    try {
+      await db.createStaffAccount({
+        username: newStaffUsername,
+        name: newStaffName,
+        password: newStaffPassword,
+        role: newStaffRole
+      }, token);
+
+      setShowAddStaffModal(false);
+      setNewStaffUsername('');
+      setNewStaffName('');
+      setNewStaffPassword('');
+      await fetchAdminData(token);
+      alert('Akun staf berhasil dibuat!');
+    } catch (err: any) {
+      setStaffError(err.message || 'Gagal menambahkan akun staf.');
+    }
+  };
+
+  const handleDeleteStaffAccount = async (id: string, staffName: string) => {
+    if (!window.confirm(`Hapus akun staf "${staffName}"?`)) return;
+    try {
+      await db.deleteStaffAccount(id, token);
+      await fetchAdminData(token);
+    } catch (err: any) {
+      alert(`Gagal menghapus akun: ${err.message}`);
+    }
+  };
+
+  // 1. FORM LOGIN DUAL-ROLE (ADMIN & PEGAWAI)
   if (!isLoggedIn) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: '24px' }}>
-        <div className="premium-card" style={{ width: '100%', maxWidth: '400px', padding: '36px', textAlign: 'left' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '65vh', padding: '24px' }}>
+        <div className="premium-card" style={{ width: '100%', maxWidth: '460px', padding: '36px', textAlign: 'left' }}>
           
           <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <div
               className="flex-center"
               style={{
-                width: '56px',
-                height: '56px',
+                width: '60px',
+                height: '60px',
                 borderRadius: '50%',
                 backgroundColor: 'rgba(78, 12, 13, 0.1)',
                 color: 'var(--color-primary)',
                 margin: '0 auto 12px'
               }}
             >
-              <Shield size={28} />
+              <Shield size={32} />
             </div>
-            <h2 style={{ fontSize: '1.5rem', marginBottom: '6px' }}>Login Administrator</h2>
-            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-              TIARA BAKERY SAKO • Akses Terenkripsi Aman
+            <h2 style={{ fontSize: '1.6rem', marginBottom: '6px' }}>Portal Masuk Pengelola</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+              TIARA BAKERY SAKO • Otorisasi Berbasis Peran (RBAC)
             </p>
+          </div>
+
+          {/* Quick Role Fill Buttons */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+            <button
+              type="button"
+              onClick={() => handleQuickLogin('admin')}
+              style={{
+                padding: '10px',
+                fontSize: '0.8rem',
+                borderRadius: '8px',
+                border: '1px solid var(--color-primary)',
+                backgroundColor: username === 'admin' ? 'var(--color-primary)' : 'transparent',
+                color: username === 'admin' ? 'white' : 'var(--color-primary)',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              👑 Login Admin
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickLogin('pegawai')}
+              style={{
+                padding: '10px',
+                fontSize: '0.8rem',
+                borderRadius: '8px',
+                border: '1px solid #0288D1',
+                backgroundColor: username === 'pegawai' ? '#0288D1' : 'transparent',
+                color: username === 'pegawai' ? 'white' : '#0288D1',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              👨‍🍳 Login Pegawai
+            </button>
           </div>
 
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div>
               <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-dark)', display: 'block', marginBottom: '4px' }}>
-                Username
+                Username Pengguna
               </label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="Masukkan username admin"
+                placeholder="Masukkan username (admin / pegawai)"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
@@ -323,12 +533,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
 
             <div>
               <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-dark)', display: 'block', marginBottom: '4px' }}>
-                Password
+                Kata Sandi (Password)
               </label>
               <input
                 type="password"
                 className="form-input"
-                placeholder="Masukkan password admin"
+                placeholder="Masukkan kata sandi"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -368,14 +578,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             >
               {isLoading ? 'Memverifikasi Sesi...' : (
                 <>
-                  Masuk Sistem Aman <Key size={16} />
+                  Masuk ke Dasbor Sistem <Key size={16} />
                 </>
               )}
             </button>
           </form>
           
-          <div style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
-            🔒 Uji Keamanan: Username default adalah **admin** dan password adalah **adminTiara123!**
+          <div style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'left', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+            <p style={{ fontWeight: 'bold', marginBottom: '4px' }}>🔑 Kredensial Demo Pengujian:</p>
+            <ul style={{ paddingLeft: '16px', margin: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <li><strong>Admin (Owner)</strong>: <code>admin</code> / <code>adminTiara123!</code></li>
+              <li><strong>Pegawai (Kasir)</strong>: <code>pegawai</code> / <code>pegawaiTiara123!</code></li>
+            </ul>
           </div>
 
         </div>
@@ -383,11 +597,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     );
   }
 
-  // 2. TAMPILAN DASHBOARD UTAMA ADMIN
+  // Filter Order List
+  const filteredOrders = orders.filter(o => {
+    if (orderFilter === 'Semua') return true;
+    return o.status === orderFilter;
+  });
+
+  // Calculate POS Order Total
+  const posTotalCalculated = posCart.reduce((sum, item) => {
+    const p = products.find(prod => prod.id === item.product_id);
+    return sum + (p ? p.price * item.quantity : 0);
+  }, 0);
+
+  // 2. DASBOR UTAMA BERBASIS PERAN (ADMIN & PEGAWAI)
   return (
-    <div className="container" style={{ padding: '40px 24px', minHeight: '70vh' }}>
+    <div className="container" style={{ padding: '40px 24px', minHeight: '75vh' }}>
       
-      {/* Dashboard Header */}
+      {/* Header Dashboard & Role Badge */}
       <div
         style={{
           display: 'flex',
@@ -401,21 +627,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
         }}
       >
         <div style={{ textAlign: 'left' }}>
-          <h2 style={{ fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            Dasbor Keamanan & Pengelolaan <span style={{ fontSize: '0.85rem', padding: '4px 10px', background: 'var(--color-success-green)', color: 'white', borderRadius: '30px', fontFamily: 'var(--font-sans)', fontWeight: 'bold' }}>Secured</span>
+          <h2 style={{ fontSize: '1.8rem', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            Dasbor Pengelolaan
+            {userRole === 'admin' ? (
+              <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #8B0000, #4E0C0D)', color: 'white', borderRadius: '30px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                👑 ADMINISTRATOR (OWNER)
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #0288D1, #01579B)', color: 'white', borderRadius: '30px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                👨‍🍳 STAF OPERASIONAL / KASIR
+              </span>
+            )}
           </h2>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem' }}>
-            Selamat datang Administrator TIARA BAKERY SAKO
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', margin: 0 }}>
+            Selamat bekerja, <strong>{userDisplayName}</strong> di TIARA BAKERY SAKO
           </p>
         </div>
 
-        <button
-          onClick={handleLogout}
-          className="btn-outline"
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#D9534F', borderColor: '#D9534F' }}
-        >
-          Keluar Sesi <LogOut size={16} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Quick POS button available for both Admin and Pegawai */}
+          <button
+            onClick={() => setShowPosModal(true)}
+            className="btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '10px 16px', backgroundColor: '#2E7D32' }}
+          >
+            <Store size={18} /> POS Kasir Cepat
+          </button>
+
+          <button
+            onClick={handleLogout}
+            className="btn-outline"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#D9534F', borderColor: '#D9534F', padding: '10px 16px' }}
+          >
+            Keluar <LogOut size={16} />
+          </button>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '30px' }} className="grid">
@@ -433,8 +679,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               borderColor: 'var(--color-border)'
             }}
           >
-            <ShoppingBag size={18} /> Manajemen Pesanan
+            <ShoppingBag size={18} /> Pesanan & POS Kasir
           </button>
+
           <button
             onClick={() => setActiveTab('products')}
             className={`btn-secondary`}
@@ -446,21 +693,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               borderColor: 'var(--color-border)'
             }}
           >
-            <Package size={18} /> Manajemen Produk (CRUD)
+            <Package size={18} /> Katalog & Stok Produk
           </button>
-          <button
-            onClick={() => setActiveTab('security')}
-            className={`btn-secondary`}
-            style={{
-              justifyContent: 'flex-start',
-              width: '100%',
-              backgroundColor: activeTab === 'security' ? 'var(--color-primary)' : 'var(--color-card-cream)',
-              color: activeTab === 'security' ? 'white' : 'var(--color-primary)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <Terminal size={18} /> Log Keamanan (Audit)
-          </button>
+
           <button
             onClick={() => setActiveTab('chatbot')}
             className={`btn-secondary`}
@@ -472,61 +707,108 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               borderColor: 'var(--color-border)'
             }}
           >
-            <MessageSquare size={18} /> Pengaturan Chatbot
+            <MessageSquare size={18} /> Chatbot AI & FAQ {userRole === 'pegawai' && '(Read-Only)'}
           </button>
 
+          <button
+            onClick={() => setActiveTab('security')}
+            className={`btn-secondary`}
+            style={{
+              justifyContent: 'flex-start',
+              width: '100%',
+              backgroundColor: activeTab === 'security' ? 'var(--color-primary)' : 'var(--color-card-cream)',
+              color: activeTab === 'security' ? 'white' : 'var(--color-primary)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Terminal size={18} /> {userRole === 'admin' ? 'Log Audit & Akun Staf' : 'Info Akses Sistem'}
+          </button>
+
+          {/* Info Hak Akses Peran */}
           <div
             style={{
-              marginTop: '30px',
-              backgroundColor: 'rgba(78, 12, 13, 0.05)',
-              padding: '16px',
+              marginTop: '20px',
+              backgroundColor: userRole === 'admin' ? 'rgba(78, 12, 13, 0.05)' : 'rgba(2, 136, 209, 0.08)',
+              padding: '14px',
               borderRadius: '12px',
               border: '1px solid var(--color-border)',
               fontSize: '0.8rem',
               color: 'var(--color-text-dark)'
             }}
           >
-            <h4 style={{ fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-primary)' }}>Keamanan Terpasang:</h4>
-            <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <li>Row-Level Security (RLS)</li>
-              <li>Input HTML Sanitized</li>
-              <li>Zod Schema Validation</li>
-              <li>Anti-Brute Force active</li>
-            </ul>
+            <h4 style={{ fontSize: '0.85rem', marginBottom: '6px', color: userRole === 'admin' ? 'var(--color-primary)' : '#0288D1' }}>
+              Hak Akses Peran Aktif:
+            </h4>
+            {userRole === 'admin' ? (
+              <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px', margin: 0 }}>
+                <li>✅ Full CRUD Produk & Katalog</li>
+                <li>✅ Manajemen Kelola Pesanan</li>
+                <li>✅ Manajemen Akun Staf Pegawai</li>
+                <li>✅ Audit Log & Konfigurasi AI</li>
+              </ul>
+            ) : (
+              <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px', margin: 0 }}>
+                <li>✅ Pemrosesan Pesanan & POS Kasir</li>
+                <li>✅ Update Stok Produk Cepat</li>
+                <li>🔒 Hapus Produk/Pesanan Dibatasi</li>
+                <li>🔒 Konfigurasi Akun/Log Dibatasi</li>
+              </ul>
+            )}
           </div>
         </div>
 
         {/* Tab Contents */}
         <div className="premium-card" style={{ padding: '24px', backgroundColor: 'var(--color-card-cream)' }}>
           
-          {/* TAB 1: MANAJEMEN PESANAN */}
+          {/* TAB 1: MANAJEMEN PESANAN & POS KASIR */}
           {activeTab === 'orders' && (
             <div style={{ textAlign: 'left' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Daftar Pesanan Masuk ({orders.length})</h3>
-                <button
-                  onClick={() => fetchAdminData(token)}
-                  style={{ background: 'transparent', cursor: 'pointer', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
-                >
-                  <RefreshCw size={14} /> Refresh Data
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Daftar Pesanan Masuk ({filteredOrders.length})</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+                    Kelola status pesanan masuk dari aplikasi website atau input langsung via POS Kasir
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <select
+                    value={orderFilter}
+                    onChange={(e) => setOrderFilter(e.target.value as any)}
+                    className="form-input"
+                    style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+                  >
+                    <option value="Semua">Semua Status ({orders.length})</option>
+                    <option value="Pending">Pending ({orders.filter(o => o.status === 'Pending').length})</option>
+                    <option value="Diproses">Diproses ({orders.filter(o => o.status === 'Diproses').length})</option>
+                    <option value="Selesai">Selesai ({orders.filter(o => o.status === 'Selesai').length})</option>
+                  </select>
+
+                  <button
+                    onClick={() => fetchAdminData(token)}
+                    className="btn-outline"
+                    style={{ padding: '6px 12px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <RefreshCw size={14} /> Refresh
+                  </button>
+                </div>
               </div>
 
               {isLoading ? (
                 <div style={{ textAlign: 'center', padding: '40px' }}>Memuat data pesanan...</div>
-              ) : orders.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  {orders.map((o) => (
+              ) : filteredOrders.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {filteredOrders.map((o) => (
                     <div
                       key={o.id}
                       style={{
                         border: '1px solid var(--color-border)',
                         borderRadius: '12px',
-                        padding: '20px',
+                        padding: '18px',
                         backgroundColor: '#FFFDF9'
                       }}
                     >
-                      {/* Order info header */}
+                      {/* Order Header */}
                       <div
                         style={{
                           display: 'flex',
@@ -540,17 +822,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                         }}
                       >
                         <div>
-                          <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--color-primary)' }}>
+                          <h4 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             Pesanan #{o.id}
+                            <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', backgroundColor: o.delivery_method === 'Ambil Sendiri' ? '#E8F5E9' : '#E3F2FD', color: o.delivery_method === 'Ambil Sendiri' ? '#2E7D32' : '#1565C0', fontWeight: 'bold' }}>
+                              {o.delivery_method}
+                            </span>
                           </h4>
                           <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                            Dibuat: {new Date(o.created_at).toLocaleString('id-ID')}
+                            Waktu: {new Date(o.created_at).toLocaleString('id-ID')}
                           </span>
                         </div>
 
-                        {/* Status update controller */}
+                        {/* Status Switcher */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Status:</span>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Ubah Status:</span>
                           <select
                             value={o.status}
                             onChange={(e) => handleUpdateStatus(o.id, e.target.value as any)}
@@ -559,391 +844,452 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                               borderRadius: '6px',
                               border: '1px solid var(--color-border)',
                               fontSize: '0.85rem',
-                              fontWeight: 600,
+                              fontWeight: 'bold',
                               backgroundColor: o.status === 'Pending' ? '#FEEFB3' : o.status === 'Diproses' ? '#BDE5F8' : '#DFF2BF',
-                              color: o.status === 'Pending' ? '#9F6000' : o.status === 'Diproses' ? '#00529B' : '#4F8A10'
+                              color: o.status === 'Pending' ? '#9F6000' : o.status === 'Diproses' ? '#00529B' : '#4F8A10',
+                              cursor: 'pointer'
                             }}
                           >
-                            <option value="Pending">Pending</option>
-                            <option value="Diproses">Diproses</option>
-                            <option value="Selesai">Selesai</option>
+                            <option value="Pending">⏳ Pending</option>
+                            <option value="Diproses">👨‍🍳 Diproses</option>
+                            <option value="Selesai">✅ Selesai</option>
                           </select>
                         </div>
                       </div>
 
                       {/* Customer Details */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '0.9rem', marginBottom: '16px' }} className="grid">
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '0.88rem', marginBottom: '14px' }} className="grid">
                         <div>
-                          <p><strong>Nama:</strong> {o.customer_name}</p>
-                          <p><strong>WhatsApp:</strong> {o.customer_phone}</p>
+                          <p style={{ margin: '0 0 4px' }}><strong>Pelanggan:</strong> {o.customer_name}</p>
+                          <p style={{ margin: 0 }}><strong>No. WhatsApp:</strong> {o.customer_phone}</p>
                         </div>
                         <div>
-                          <p><strong>Metode:</strong> {o.delivery_method}</p>
-                          {o.address && <p><strong>Alamat:</strong> {o.address}</p>}
+                          {o.address && <p style={{ margin: '0 0 4px' }}><strong>Alamat Pengiriman:</strong> {o.address}</p>}
+                          <p style={{ margin: 0 }}><strong>Total Pesanan:</strong> <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>Rp{o.total_price.toLocaleString()}</span></p>
                         </div>
                       </div>
 
-                      {/* Items Table */}
+                      {/* Items Rincian */}
                       <div style={{ backgroundColor: 'var(--color-bg-cream)', padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-                        <h5 style={{ fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-primary)' }}>Rincian Belanja:</h5>
+                        <h5 style={{ fontSize: '0.85rem', margin: '0 0 8px', color: 'var(--color-primary)' }}>Rincian Item Belanja:</h5>
                         <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                           <thead>
                             <tr style={{ borderBottom: '1px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-muted)' }}>
                               <th style={{ paddingBottom: '6px' }}>Nama Produk</th>
                               <th style={{ paddingBottom: '6px', textAlign: 'center' }}>Jumlah</th>
-                              <th style={{ paddingBottom: '6px', textAlign: 'right' }}>Harga</th>
+                              <th style={{ paddingBottom: '6px', textAlign: 'right' }}>Harga Satuan</th>
                             </tr>
                           </thead>
                           <tbody>
                             {o.items?.map((item) => (
                               <tr key={item.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
                                 <td style={{ padding: '6px 0' }}>{item.product_name}</td>
-                                <td style={{ padding: '6px 0', textAlign: 'center' }}>{item.quantity} pcs</td>
-                                <td style={{ padding: '6px 0', textAlign: 'right' }}>Rp {item.price_at_purchase.toLocaleString()}</td>
+                                <td style={{ padding: '6px 0', textAlign: 'center' }}>{item.quantity}x</td>
+                                <td style={{ padding: '6px 0', textAlign: 'right' }}>Rp{item.price_at_purchase.toLocaleString()}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px', fontWeight: 'bold', fontSize: '0.95rem', color: 'var(--color-primary)' }}>
-                          Total: Rp {o.total_price.toLocaleString()}
-                        </div>
                       </div>
-
                     </div>
                   ))}
                 </div>
               ) : (
                 <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-                  Belum ada pesanan masuk.
+                  Belum ada pesanan masuk untuk kategori ini.
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB 2: MANAJEMEN PRODUK */}
+          {/* TAB 2: KATALOG & MANAJEMEN STOK PRODUK */}
           {activeTab === 'products' && (
             <div style={{ textAlign: 'left' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Daftar Kue & Roti Toko</h3>
-                <button onClick={handleOpenAddModal} className="btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
-                  <Plus size={16} /> Tambah Produk Baru
-                </button>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-muted)' }}>
-                      <th style={{ padding: '12px' }}>Foto</th>
-                      <th style={{ padding: '12px' }}>Nama Produk</th>
-                      <th style={{ padding: '12px' }}>Kategori</th>
-                      <th style={{ padding: '12px', textAlign: 'right' }}>Harga</th>
-                      <th style={{ padding: '12px', textAlign: 'center' }}>Stok</th>
-                      <th style={{ padding: '12px', textAlign: 'center' }}>Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {products.map((p) => (
-                      <tr key={p.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ padding: '12px' }}>
-                          <img src={p.image_url} alt={p.name} style={{ width: '40px', height: '40px', borderRadius: '4px', objectFit: 'cover' }} />
-                        </td>
-                        <td style={{ padding: '12px', fontWeight: 600, color: 'var(--color-primary)' }}>{p.name}</td>
-                        <td style={{ padding: '12px' }}>{p.category}</td>
-                        <td style={{ padding: '12px', textAlign: 'right' }}>Rp {p.price.toLocaleString()}</td>
-                        <td style={{ padding: '12px', textAlign: 'center', fontWeight: p.stock <= 5 ? 'bold' : 'normal', color: p.stock <= 5 ? '#D9534F' : 'inherit' }}>
-                          {p.stock} pcs
-                        </td>
-                        <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                            <button onClick={() => handleOpenEditModal(p)} style={{ background: 'transparent', cursor: 'pointer', color: 'var(--color-primary)' }} title="Edit">
-                              <Edit3 size={16} />
-                            </button>
-                            <button onClick={() => handleDeleteProduct(p.id)} style={{ background: 'transparent', cursor: 'pointer', color: '#D9534F' }} title="Hapus">
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: LOG AUDIT KEAMANAN */}
-          {activeTab === 'security' && (
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
-                  <h3 style={{ fontSize: '1.35rem', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    Sistem Log Audit Keamanan (Security Audit Logs)
-                  </h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: 0 }}>
-                    Mencatat seluruh aktivitas otentikasi, modifikasi, dan potensi ancaman yang berhasil ditangkal secara real-time.
+                  <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Katalog Produk & Penyesuaian Stok</h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+                    {userRole === 'admin' ? 'Kelola produk penuh (Tambah, Edit, Hapus, & Update Stok)' : 'Staf dapat melihat katalog & memperbarui jumlah stok kue yang tersedia'}
                   </p>
                 </div>
-                <button
-                  onClick={() => fetchAdminData(token)}
-                  style={{ background: 'transparent', cursor: 'pointer', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
-                >
-                  <RefreshCw size={14} /> Refresh Logs
-                </button>
+
+                {userRole === 'admin' && (
+                  <button onClick={handleOpenAddModal} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Plus size={16} /> Tambah Produk Baru
+                  </button>
+                )}
               </div>
 
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
-                      <th style={{ padding: '10px' }}>Waktu</th>
-                      <th style={{ padding: '10px' }}>Kategori Event</th>
-                      <th style={{ padding: '10px' }}>Deskripsi Rincian</th>
-                      <th style={{ padding: '10px', textAlign: 'center' }}>IP Client</th>
-                      <th style={{ padding: '10px', textAlign: 'center' }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {securityLogs.map((log) => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.05)', backgroundColor: log.status === 'WARNING' ? 'rgba(217, 83, 79, 0.05)' : log.status === 'FAILED' ? 'rgba(240, 173, 78, 0.05)' : 'transparent' }}>
-                        <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>{new Date(log.timestamp).toLocaleString('id-ID')}</td>
-                        <td style={{ padding: '10px', fontWeight: 'bold' }}>
-                          <span style={{ color: log.status === 'WARNING' || log.status === 'FAILED' ? '#D9534F' : 'var(--color-primary)' }}>
-                            {log.eventType}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+                {products.map((p) => (
+                  <div
+                    key={p.id}
+                    style={{
+                      border: '1px solid var(--color-border)',
+                      borderRadius: '12px',
+                      padding: '16px',
+                      backgroundColor: '#FFFDF9',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <div>
+                      <div style={{ height: '140px', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px' }}>
+                        <img src={p.image_url} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                        <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--color-primary)' }}>{p.name}</h4>
+                        <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'var(--color-bg-cream)', border: '1px solid var(--color-border)' }}>
+                          {p.category}
+                        </span>
+                      </div>
+
+                      <p style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--color-secondary-gold)', margin: '0 0 10px' }}>
+                        Rp{p.price.toLocaleString()}
+                      </p>
+
+                      {/* Quick Stock Controller */}
+                      <div style={{ backgroundColor: 'rgba(78, 12, 13, 0.04)', padding: '10px', borderRadius: '8px', marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>Stok Tersedia:</span>
+                          <span style={{ fontSize: '1rem', fontWeight: 'bold', color: p.stock <= 5 ? '#D9534F' : '#2E7D32' }}>
+                            {p.stock} Pcs
                           </span>
-                        </td>
-                        <td style={{ padding: '10px' }}>{log.detail}</td>
-                        <td style={{ padding: '10px', textAlign: 'center', fontFamily: 'monospace' }}>{log.ipSimulated}</td>
-                        <td style={{ padding: '10px', textAlign: 'center' }}>
-                          <span
-                            style={{
-                              padding: '2px 8px',
-                              borderRadius: '10px',
-                              fontSize: '0.75rem',
-                              fontWeight: 'bold',
-                              backgroundColor: log.status === 'SUCCESS' ? '#DFF2BF' : log.status === 'WARNING' ? '#FEEFB3' : '#FFD2D2',
-                              color: log.status === 'SUCCESS' ? '#4F8A10' : log.status === 'WARNING' ? '#9F6000' : '#D8000C'
-                            }}
+                        </div>
+
+                        {/* Quick adjustment buttons */}
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            onClick={() => handleQuickStockUpdate(p.id, Math.max(0, p.stock - 1))}
+                            style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}
                           >
-                            {log.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-
-          {/* TAB 4: PENGATURAN CHATBOT */}
-          {activeTab === 'chatbot' && (
-            <div style={{ textAlign: 'left' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', borderBottom: '1px solid var(--color-border)', paddingBottom: '12px' }}>
-                <div>
-                  <h3 style={{ fontSize: '1.35rem', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    Pengaturan Asisten Toko & Basis Pengetahuan
-                  </h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: 0 }}>
-                    Kustomisasi identitas pelayan virtual toko dan tambah data jawaban otomatis (FAQ) agar asisten pintar menjawab chat pelanggan dengan tepat.
-                  </p>
-                </div>
-                <button
-                  onClick={() => fetchAdminData(token)}
-                  style={{ background: 'transparent', cursor: 'pointer', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem' }}
-                >
-                  <RefreshCw size={14} /> Refresh
-                </button>
-              </div>
-
-              {/* Grid Layout */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '30px' }}>
-                
-                {/* Bagian 1: Profil Asisten */}
-                <div style={{ backgroundColor: '#FFFDF9', border: '1px solid var(--color-border)', borderRadius: '12px', padding: '20px' }}>
-                  <h4 style={{ margin: '0 0 16px 0', fontSize: '1.05rem', color: 'var(--color-primary)', borderBottom: '1px dashed var(--color-border)', paddingBottom: '8px' }}>
-                    🤖 Profil & Karakter Chatbot
-                  </h4>
-                  
-                  <form onSubmit={handleSaveBotSettings} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div>
-                      <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Nama Panggilan Chatbot</label>
-                      <input 
-                        type="text" 
-                        className="form-input" 
-                        value={botNameInput} 
-                        onChange={(e) => setBotNameInput(e.target.value)} 
-                        required 
-                        placeholder="Contoh: Tiara"
-                      />
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Nama ini akan ditampilkan pada header chat pelanggan.</span>
+                            -1
+                          </button>
+                          <button
+                            onClick={() => handleQuickStockUpdate(p.id, p.stock + 1)}
+                            style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}
+                          >
+                            +1
+                          </button>
+                          <button
+                            onClick={() => handleQuickStockUpdate(p.id, p.stock + 5)}
+                            style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}
+                          >
+                            +5
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
-                    <div>
-                      <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Pesan Sambutan Awal (Welcome Message)</label>
-                      <textarea 
-                        className="form-input" 
-                        rows={4} 
-                        value={welcomeMessageInput} 
-                        onChange={(e) => setWelcomeMessageInput(e.target.value)} 
-                        required
-                        style={{ resize: 'vertical' }}
-                        placeholder="Ketik kalimat sambutan..."
-                      />
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Gunakan format markdown `**tebal**` untuk menebalkan kata.</span>
-                    </div>
-
-                    <div>
-                      <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Jawaban Default (Fallback Message)</label>
-                      <textarea 
-                        className="form-input" 
-                        rows={4} 
-                        value={defaultFallbackInput} 
-                        onChange={(e) => setDefaultFallbackInput(e.target.value)} 
-                        required
-                        style={{ resize: 'vertical' }}
-                        placeholder="Ketik jawaban chatbot bila tidak mengerti pertanyaan..."
-                      />
-                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Ditampilkan bila pertanyaan user tidak cocok dengan katalog atau FAQ mana pun.</span>
-                    </div>
-
-                    {botSettingsSuccess && (
-                      <div style={{ backgroundColor: '#DFF2BF', color: '#4F8A10', padding: '10px', borderRadius: '6px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <CheckCircle size={16} /> <span>{botSettingsSuccess}</span>
+                    {userRole === 'admin' ? (
+                      <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-border)', paddingTop: '12px', marginTop: '10px' }}>
+                        <button
+                          onClick={() => handleOpenEditModal(p)}
+                          className="btn-outline"
+                          style={{ flex: 1, padding: '6px', fontSize: '0.8rem', justifyContent: 'center' }}
+                        >
+                          <Edit3 size={14} /> Edit Detail
+                        </button>
+                        <button
+                          onClick={() => handleDeleteProduct(p.id)}
+                          style={{ padding: '6px 10px', backgroundColor: '#FDEDEC', color: '#D9534F', border: '1px solid #FADBD8', borderRadius: '6px', cursor: 'pointer' }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center', paddingTop: '6px' }}>
+                        💡 Staf dapat langsung menyesuaikan stok di atas
                       </div>
                     )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                    <button 
-                      type="submit" 
-                      className="btn-primary" 
-                      disabled={isSavingBotSettings}
-                      style={{ alignSelf: 'flex-start', minWidth: '150px', justifyContent: 'center' }}
-                    >
-                      {isSavingBotSettings ? 'Menyimpan...' : 'Simpan Profil Bot'}
-                    </button>
-                  </form>
+          {/* TAB 3: CHATBOT AI & FAQ KNOWLEDGE BASE */}
+          {activeTab === 'chatbot' && (
+            <div style={{ textAlign: 'left' }}>
+              {userRole === 'pegawai' && (
+                <div style={{ backgroundColor: 'rgba(2, 136, 209, 0.1)', padding: '12px 16px', borderRadius: '8px', border: '1px solid #0288D1', color: '#01579B', fontSize: '0.85rem', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Lock size={16} />
+                  <span><strong>Mode Baca (Read-Only):</strong> Hanya Admin yang memiliki wewenang mengubah sistem prompt dan FAQ Chatbot.</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Pengaturan Pelayan Virtual "Tiara"</h3>
+              </div>
+
+              {/* Bot Persona Form */}
+              <form onSubmit={handleSaveBotSettings} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Nama Pelayan Virtual</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={botNameInput}
+                    onChange={(e) => setBotNameInput(e.target.value)}
+                    disabled={userRole !== 'admin'}
+                  />
                 </div>
 
-                {/* Bagian 2: Daftar FAQ / Knowledge */}
-                <div style={{ backgroundColor: '#FFFDF9', border: '1px solid var(--color-border)', borderRadius: '12px', padding: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px dashed var(--color-border)', paddingBottom: '8px' }}>
-                    <h4 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--color-primary)' }}>
-                      📚 Basis Pengetahuan FAQ (Data & Kata Kunci)
-                    </h4>
-                    <button 
-                      onClick={handleOpenAddFaqModal} 
-                      className="btn-primary" 
-                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                    >
-                      <Plus size={14} /> Tambah FAQ Baru
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Pesan Menyapa Awal (Welcome Message)</label>
+                  <textarea
+                    className="form-input"
+                    rows={3}
+                    value={welcomeMessageInput}
+                    onChange={(e) => setWelcomeMessageInput(e.target.value)}
+                    disabled={userRole !== 'admin'}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Pesan Jawaban Default (Fallback Message)</label>
+                  <textarea
+                    className="form-input"
+                    rows={3}
+                    value={defaultFallbackInput}
+                    onChange={(e) => setDefaultFallbackInput(e.target.value)}
+                    disabled={userRole !== 'admin'}
+                  />
+                </div>
+
+                {botSettingsSuccess && (
+                  <div style={{ color: 'var(--color-success-green)', fontSize: '0.85rem', fontWeight: 'bold' }}>{botSettingsSuccess}</div>
+                )}
+
+                {userRole === 'admin' && (
+                  <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isSavingBotSettings}>
+                    {isSavingBotSettings ? 'Menyimpan...' : 'Simpan Pengaturan Chatbot'}
+                  </button>
+                )}
+              </form>
+
+              <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', margin: '24px 0' }} />
+
+              {/* FAQ Knowledge Table */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h4 style={{ fontSize: '1.1rem', margin: 0 }}>Basis Pengetahuan FAQ Chatbot ({chatbotKnowledge.length})</h4>
+                {userRole === 'admin' && (
+                  <button onClick={handleOpenAddFaqModal} className="btn-outline" style={{ fontSize: '0.85rem', padding: '6px 12px' }}>
+                    <Plus size={14} /> Tambah Kata Kunci FAQ
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {chatbotKnowledge.map((faq) => (
+                  <div key={faq.id} style={{ border: '1px solid var(--color-border)', padding: '14px', borderRadius: '8px', backgroundColor: '#FFFDF9' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 'bold', padding: '2px 8px', backgroundColor: 'var(--color-primary)', color: 'white', borderRadius: '4px' }}>
+                        Kata Kunci: "{faq.keyword}"
+                      </span>
+                      {userRole === 'admin' && (
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button onClick={() => handleOpenEditFaqModal(faq)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-primary)' }}><Edit3 size={14} /></button>
+                          <button onClick={() => handleDeleteFaq(faq.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D9534F' }}><Trash2 size={14} /></button>
+                        </div>
+                      )}
+                    </div>
+                    <p style={{ margin: '4px 0', fontSize: '0.85rem', fontWeight: 'bold' }}>T: {faq.question}</p>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--color-text-dark)' }}>J: {faq.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: LOG AUDIT KEAMANAN & AKUN STAF (KHUSUS ADMIN) */}
+          {activeTab === 'security' && (
+            <div style={{ textAlign: 'left' }}>
+              {userRole !== 'admin' ? (
+                <div style={{ textAlign: 'center', padding: '50px 20px' }}>
+                  <Lock size={48} style={{ color: 'var(--color-primary)', marginBottom: '16px' }} />
+                  <h3 style={{ fontSize: '1.3rem' }}>Akses Khusus Administrator (Owner)</h3>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', maxWidth: '400px', margin: '8px auto 0' }}>
+                    Log audit keamanan dan pengelolaan akun staf pegawai hanya dapat diakses oleh Administrator dengan kredensial penuh.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Kelola Akun Staf Pegawai ({staffAccounts.length})</h3>
+                    <button onClick={() => setShowAddStaffModal(true)} className="btn-primary" style={{ fontSize: '0.85rem', padding: '8px 14px' }}>
+                      <UserPlus size={16} /> Tambah Staf Baru
                     </button>
                   </div>
 
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-                    Sistem akan mencocokkan kata kunci (keyword) dari pesan pelanggan. Jika cocok, chatbot akan langsung menjawab dengan teks jawaban di bawah.
-                  </p>
-
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  {/* Staff Table */}
+                  <div style={{ marginBottom: '32px', border: '1px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                       <thead>
-                        <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-muted)' }}>
-                          <th style={{ padding: '10px', width: '150px' }}>Kata Kunci</th>
-                          <th style={{ padding: '10px' }}>Pertanyaan Acuan</th>
-                          <th style={{ padding: '10px' }}>Jawaban Chatbot</th>
-                          <th style={{ padding: '10px', textAlign: 'center', width: '100px' }}>Aksi</th>
+                        <tr style={{ backgroundColor: 'var(--color-primary)', color: 'white', textAlign: 'left' }}>
+                          <th style={{ padding: '10px' }}>Nama Lengkap</th>
+                          <th style={{ padding: '10px' }}>Username</th>
+                          <th style={{ padding: '10px' }}>Peran (Role)</th>
+                          <th style={{ padding: '10px', textAlign: 'center' }}>Tindakan</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {chatbotKnowledge.length > 0 ? (
-                          chatbotKnowledge.map((faq) => (
-                            <tr key={faq.id} style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-                              <td style={{ padding: '10px' }}>
-                                <code style={{ backgroundColor: '#FFF5F5', color: 'var(--color-primary)', padding: '2px 6px', borderRadius: '4px', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                                  {faq.keyword}
-                                </code>
-                              </td>
-                              <td style={{ padding: '10px', color: 'var(--color-text-muted)' }}>{faq.question}</td>
-                              <td style={{ padding: '10px', whiteSpace: 'pre-line' }}>{faq.answer}</td>
-                              <td style={{ padding: '10px', textAlign: 'center' }}>
-                                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                                  <button
-                                    onClick={() => handleOpenEditFaqModal(faq)}
-                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-primary)' }}
-                                    title="Edit FAQ"
-                                  >
-                                    <Edit3 size={14} />
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteFaq(faq.id)}
-                                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#D9534F' }}
-                                    title="Hapus FAQ"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={4} style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                              Belum ada data FAQ khusus. Klik tombol "Tambah FAQ Baru" untuk menginstruksikan bot.
+                        {staffAccounts.map((acc) => (
+                          <tr key={acc.id} style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: '#FFFDF9' }}>
+                            <td style={{ padding: '10px' }}><strong>{acc.name}</strong></td>
+                            <td style={{ padding: '10px' }}><code>{acc.username}</code></td>
+                            <td style={{ padding: '10px' }}>
+                              <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: acc.role === 'admin' ? '#FADBD8' : '#D4E6F1', color: acc.role === 'admin' ? '#78281F' : '#1B4F72' }}>
+                                {acc.role.toUpperCase()}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px', textAlign: 'center' }}>
+                              {acc.username !== 'admin' && (
+                                <button onClick={() => handleDeleteStaffAccount(acc.id, acc.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D9534F' }}>
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
                             </td>
                           </tr>
-                        )}
+                        ))}
                       </tbody>
                     </table>
                   </div>
-                </div>
 
-              </div>
+                  <h3 style={{ fontSize: '1.2rem', marginBottom: '12px' }}>Audit Log Aktivitas Keamanan ({securityLogs.length})</h3>
+                  <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '12px', backgroundColor: '#1E1E1E', color: '#00FF66', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                    {securityLogs.map((log) => (
+                      <div key={log.id} style={{ marginBottom: '6px', borderBottom: '1px dashed #333', paddingBottom: '4px' }}>
+                        [{new Date(log.timestamp).toLocaleTimeString()}] [{log.status}] [{log.eventType}] - {log.detail} (IP: {log.ipSimulated})
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
         </div>
       </div>
 
-      {/* CRUD PRODUK MODAL DIALOG */}
-      {showProductModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1010
-          }}
-        >
-          <div className="premium-card" style={{ width: '450px', padding: '24px', textAlign: 'left', backgroundColor: 'white' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0 }}>{editProduct ? 'Edit Kue/Roti' : 'Tambah Kue Baru'}</h3>
-              <button onClick={() => setShowProductModal(false)} style={{ background: 'transparent', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
+      {/* MODAL POS KASIR */}
+      {showPosModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="premium-card" style={{ width: '100%', maxWidth: '640px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', textAlign: 'left' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--color-border)', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.25rem', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Store size={22} /> POS Kasir - Buat Pesanan Toko Langsung
+              </h3>
+              <button onClick={() => setShowPosModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
 
-            <form onSubmit={handleSaveProduct} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form onSubmit={handlePosSubmitOrder} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }} className="grid">
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Nama Pelanggan Walk-in</label>
+                  <input type="text" className="form-input" value={posCustomerName} onChange={(e) => setPosCustomerName(e.target.value)} required />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>No. WhatsApp / HP</label>
+                  <input type="text" className="form-input" value={posCustomerPhone} onChange={(e) => setPosCustomerPhone(e.target.value)} required />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }} className="grid">
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Metode Penyerahan</label>
+                  <select
+                    className="form-input"
+                    value={posDeliveryMethod}
+                    onChange={(e) => setPosDeliveryMethod(e.target.value as any)}
+                  >
+                    <option value="Ambil Sendiri">Ambil Sendiri di Toko</option>
+                    <option value="Kirim ke Rumah">Kirim ke Rumah (Kurir)</option>
+                  </select>
+                </div>
+                {posDeliveryMethod === 'Kirim ke Rumah' && (
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Alamat Pengiriman</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Alamat lengkap tujuan"
+                      value={posAddress}
+                      onChange={(e) => setPosAddress(e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
+              </div>
+
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Nama Produk</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Pilih Produk Belanjaan:</label>
+                <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '8px', backgroundColor: '#FFF' }}>
+                  {products.map((prod) => {
+                    const cartItem = posCart.find(i => i.product_id === prod.id);
+                    const qty = cartItem ? cartItem.quantity : 0;
+                    return (
+                      <div key={prod.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px', borderBottom: '1px solid #eee' }}>
+                        <div>
+                          <strong style={{ fontSize: '0.85rem' }}>{prod.name}</strong>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Rp{prod.price.toLocaleString()} • Stok: {prod.stock}</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button type="button" onClick={() => handlePosRemoveFromCart(prod.id)} disabled={qty === 0} style={{ padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}>-</button>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 'bold', minWidth: '20px', textAlign: 'center' }}>{qty}</span>
+                          <button type="button" onClick={() => handlePosAddToCart(prod.id)} disabled={prod.stock <= qty} style={{ padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', backgroundColor: 'var(--color-primary)', color: 'white', border: 'none' }}>+</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ backgroundColor: 'var(--color-bg-cream)', padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1rem', fontWeight: 'bold', color: 'var(--color-primary)' }}>
+                  <span>Total Transaksi POS:</span>
+                  <span>Rp{posTotalCalculated.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {posError && <div style={{ color: '#D9534F', fontSize: '0.8rem' }}>{posError}</div>}
+              {posSuccess && <div style={{ color: 'var(--color-success-green)', fontSize: '0.85rem', fontWeight: 'bold' }}>{posSuccess}</div>}
+
+              <button type="submit" className="btn-primary" style={{ padding: '12px', justifyContent: 'center' }}>
+                Proses Transaksi Kasir POS
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PRODUCT CRUD */}
+      {showProductModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="premium-card" style={{ width: '100%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', textAlign: 'left' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{editProduct ? 'Edit Detail Produk' : 'Tambah Produk Baru'}</h3>
+              <button onClick={() => setShowProductModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSaveProduct} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Nama Produk</label>
                 <input type="text" className="form-input" value={prodName} onChange={(e) => setProdName(e.target.value)} required />
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }} className="grid">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }} className="grid">
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Harga (Rp)</label>
-                  <input type="number" className="form-input" value={prodPrice} onChange={(e) => setProdPrice(Number(e.target.value))} required min={0} />
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Harga (Rp)</label>
+                  <input type="number" className="form-input" value={prodPrice} onChange={(e) => setProdPrice(Number(e.target.value))} required />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Stok</label>
-                  <input type="number" className="form-input" value={prodStock} onChange={(e) => setProdStock(Number(e.target.value))} required min={0} />
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Jumlah Stok</label>
+                  <input type="number" className="form-input" value={prodStock} onChange={(e) => setProdStock(Number(e.target.value))} required />
                 </div>
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Kategori</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Kategori Produk</label>
                 <select className="form-input" value={prodCategory} onChange={(e) => setProdCategory(e.target.value as any)}>
                   <option value="Roti">Roti</option>
                   <option value="Kue Basah">Kue Basah</option>
@@ -951,155 +1297,79 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                   <option value="Jajanan Pasar">Jajanan Pasar</option>
                 </select>
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Deskripsi</label>
-                <textarea className="form-input" rows={3} value={prodDescription} onChange={(e) => setProdDescription(e.target.value)} style={{ resize: 'none' }} />
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Deskripsi Produk</label>
+                <textarea className="form-input" rows={2} value={prodDescription} onChange={(e) => setProdDescription(e.target.value)} />
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Foto URL</label>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>URL Gambar Produk</label>
                 <input type="text" className="form-input" value={prodImage} onChange={(e) => setProdImage(e.target.value)} />
               </div>
-
-              {crudError && (
-                <div style={{ color: '#D9534F', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <AlertCircle size={14} /> {crudError}
-                </div>
-              )}
-
-              <button type="submit" className="btn-primary" style={{ marginTop: '10px', justifyContent: 'center' }}>
-                <CheckCircle size={16} /> Simpan Data Produk
-              </button>
+              {crudError && <div style={{ color: '#D9534F', fontSize: '0.8rem' }}>{crudError}</div>}
+              <button type="submit" className="btn-primary" style={{ justifyContent: 'center' }}>Simpan Produk</button>
             </form>
           </div>
         </div>
       )}
 
-      {/* CRUD FAQ MODAL DIALOG */}
+      {/* MODAL FAQ CRUD */}
       {showFaqModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1010
-          }}
-        >
-          <div className="premium-card" style={{ width: '450px', padding: '24px', textAlign: 'left', backgroundColor: 'white' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0 }}>{editFaq ? 'Edit FAQ Chatbot' : 'Tambah FAQ Baru'}</h3>
-              <button onClick={() => setShowFaqModal(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="premium-card" style={{ width: '100%', maxWidth: '480px', padding: '24px', textAlign: 'left' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{editFaq ? 'Edit Entri FAQ' : 'Tambah Kata Kunci FAQ Baru'}</h3>
+              <button onClick={() => setShowFaqModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
-
-            <form onSubmit={handleSaveFaq} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form onSubmit={handleSaveFaq} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Kata Kunci (Keyword)</label>
-                <input type="text" className="form-input" placeholder="contoh: alamat, jam buka, ongkir" value={faqKeyword} onChange={(e) => setFaqKeyword(e.target.value)} required />
-                <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>Memicu respon jika pelanggan mengetik kata ini.</span>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Kata Kunci Pencarian (Keyword)</label>
+                <input type="text" className="form-input" placeholder="contoh: halal, ongkir, alamat" value={faqKeyword} onChange={(e) => setFaqKeyword(e.target.value)} required />
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Pertanyaan Contoh</label>
-                <input type="text" className="form-input" placeholder="contoh: Di mana lokasi tokonya?" value={faqQuestion} onChange={(e) => setFaqQuestion(e.target.value)} required />
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Pertanyaan</label>
+                <input type="text" className="form-input" value={faqQuestion} onChange={(e) => setFaqQuestion(e.target.value)} required />
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Jawaban Chatbot</label>
-                <textarea className="form-input" rows={4} placeholder="Tulis respon otomatis chatbot..." value={faqAnswer} onChange={(e) => setFaqAnswer(e.target.value)} required style={{ resize: 'none' }} />
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Jawaban Chatbot Virtual</label>
+                <textarea className="form-input" rows={3} value={faqAnswer} onChange={(e) => setFaqAnswer(e.target.value)} required />
               </div>
-
-              {faqError && (
-                <div style={{ color: '#D9534F', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <AlertCircle size={14} /> {faqError}
-                </div>
-              )}
-
-              <button type="submit" className="btn-primary" style={{ marginTop: '10px', justifyContent: 'center' }}>
-                <CheckCircle size={16} /> Simpan Data FAQ
-              </button>
+              {faqError && <div style={{ color: '#D9534F', fontSize: '0.8rem' }}>{faqError}</div>}
+              <button type="submit" className="btn-primary" style={{ justifyContent: 'center' }}>Simpan Entri FAQ</button>
             </form>
           </div>
         </div>
       )}
 
-
-      {/* CRUD FAQ MODAL DIALOG */}
-      {showFaqModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1010
-          }}
-        >
-          <div className="premium-card" style={{ width: '450px', padding: '24px', textAlign: 'left', backgroundColor: 'white' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0 }}>{editFaq ? 'Edit Data FAQ' : 'Tambah FAQ Baru'}</h3>
-              <button onClick={() => setShowFaqModal(false)} style={{ background: 'transparent', cursor: 'pointer' }}>
-                <X size={20} />
-              </button>
+      {/* MODAL TAMBAH STAF BARU */}
+      {showAddStaffModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="premium-card" style={{ width: '100%', maxWidth: '440px', padding: '24px', textAlign: 'left' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Buat Akun Staf Baru</h3>
+              <button onClick={() => setShowAddStaffModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
-
-            <form onSubmit={handleSaveFaq} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form onSubmit={handleAddStaffAccount} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Kata Kunci (Keyword)</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={faqKeyword} 
-                  onChange={(e) => setFaqKeyword(e.target.value)} 
-                  required 
-                  placeholder="Contoh: halal"
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                  Kata kunci huruf kecil yang akan dicocokkan dengan chat pelanggan.
-                </span>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Nama Lengkap Staf</label>
+                <input type="text" className="form-input" placeholder="contoh: Siti (Kasir)" value={newStaffName} onChange={(e) => setNewStaffName(e.target.value)} required />
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Pertanyaan Acuan</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={faqQuestion} 
-                  onChange={(e) => setFaqQuestion(e.target.value)} 
-                  required 
-                  placeholder="Contoh: Apakah produknya bersertifikat halal?"
-                />
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Username</label>
+                <input type="text" className="form-input" placeholder="contoh: siti_kasir" value={newStaffUsername} onChange={(e) => setNewStaffUsername(e.target.value)} required />
               </div>
-
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '2px' }}>Jawaban Chatbot</label>
-                <textarea 
-                  className="form-input" 
-                  rows={4} 
-                  value={faqAnswer} 
-                  onChange={(e) => setFaqAnswer(e.target.value)} 
-                  required 
-                  placeholder="Ketik jawaban otomatis bot..."
-                  style={{ resize: 'vertical' }}
-                />
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Kata Sandi (Password)</label>
+                <input type="password" className="form-input" value={newStaffPassword} onChange={(e) => setNewStaffPassword(e.target.value)} required />
               </div>
-
-              {faqError && (
-                <div style={{ color: '#D9534F', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <AlertCircle size={14} /> {faqError}
-                </div>
-              )}
-
-              <button type="submit" className="btn-primary" style={{ marginTop: '10px', justifyContent: 'center' }}>
-                <CheckCircle size={16} /> Simpan Data FAQ
-              </button>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Peran (Role)</label>
+                <select className="form-input" value={newStaffRole} onChange={(e) => setNewStaffRole(e.target.value as UserRole)}>
+                  <option value="pegawai">Pegawai (Staf Operasional / Kasir)</option>
+                  <option value="admin">Administrator (Full Control)</option>
+                </select>
+              </div>
+              {staffError && <div style={{ color: '#D9534F', fontSize: '0.8rem' }}>{staffError}</div>}
+              <button type="submit" className="btn-primary" style={{ justifyContent: 'center' }}>Buat Akun Staf</button>
             </form>
           </div>
         </div>

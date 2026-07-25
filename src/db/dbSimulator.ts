@@ -48,6 +48,17 @@ export interface ChatbotSettings {
   defaultFallback: string;
 }
 
+export type UserRole = 'admin' | 'pegawai';
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  name: string;
+  role: UserRole;
+  passwordHash: string;
+  created_at: string;
+}
+
 // Seed Data Awal sesuai schema.sql
 const INITIAL_PRODUCTS: Product[] = [
   {
@@ -172,6 +183,21 @@ const INITIAL_PRODUCTS: Product[] = [
   }
 ];
 
+// Helper untuk hash password sederhana (dengan fallback aman untuk non-secure HTTP / local IP)
+const sha256 = async (message: string): Promise<string> => {
+  try {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
+      const msgBuffer = new TextEncoder().encode(message);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {
+    console.warn('SubtleCrypto tidak tersedia pada konteks ini. Mengaktifkan fallback aman.');
+  }
+  return 'fallback-crypto-disabled';
+};
+
 // Inisialisasi Database Lokal
 const initDB = () => {
   if (!localStorage.getItem('tb_products')) {
@@ -184,15 +210,28 @@ const initDB = () => {
     localStorage.setItem('tb_order_items', JSON.stringify([]));
   }
   
-  // Simulasi Kredensial Admin: Username 'admin', Password SHA-256 (simulasi) dari 'adminTiara123!'
-  // Hash: 'e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db'
-  // Melakukan reset jika key tidak ada atau bernilai salah
-  const currentAdmin = localStorage.getItem('tb_admin_user');
-  if (!currentAdmin || !currentAdmin.includes('e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db')) {
-    localStorage.setItem('tb_admin_user', JSON.stringify({
+  // Inisialisasi Akun Pengguna (Admin & Pegawai)
+  const defaultUsers: UserAccount[] = [
+    {
+      id: 'user-admin',
       username: 'admin',
-      passwordHash: 'e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db'
-    }));
+      name: 'Administrator (Owner)',
+      role: 'admin',
+      passwordHash: 'e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db', // adminTiara123!
+      created_at: new Date().toISOString()
+    },
+    {
+      id: 'user-pegawai',
+      username: 'pegawai',
+      name: 'Budi (Staf Kasir)',
+      role: 'pegawai',
+      passwordHash: 'a587eeedef2ebfdfa40c62ff92429a1b154a4f8d22bb425c2ee035c9118e6cb0', // pegawaiTiara123!
+      created_at: new Date().toISOString()
+    }
+  ];
+
+  if (!localStorage.getItem('tb_user_accounts')) {
+    localStorage.setItem('tb_user_accounts', JSON.stringify(defaultUsers));
   }
 
   // Log Security Events
@@ -248,21 +287,6 @@ const initDB = () => {
 
 initDB();
 
-// Helper untuk hash password sederhana (dengan fallback aman untuk non-secure HTTP / local IP)
-const sha256 = async (message: string): Promise<string> => {
-  try {
-    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
-      const msgBuffer = new TextEncoder().encode(message);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-  } catch (e) {
-    console.warn('SubtleCrypto tidak tersedia pada konteks non-HTTPS ini. Mengaktifkan fallback aman.');
-  }
-  return 'fallback-crypto-disabled';
-};
-
 // Input Sanitization helper untuk mencegah XSS
 export const sanitizeInput = (text: string): string => {
   return text
@@ -289,9 +313,12 @@ export const logSecurityEvent = (eventType: string, detail: string, status: 'SUC
   localStorage.setItem('tb_security_logs', JSON.stringify(logs.slice(0, 100))); // Simpan max 100 logs
 };
 
-// Rate Limiter Simulator untuk Login Admin
-// Membatasi maksimal 5 percobaan login gagal dalam 1 menit
+// Rate Limiter Simulator
 const LOGIN_ATTEMPTS: { [key: string]: { count: number; blockedUntil: number } } = {};
+
+const isValidSessionToken = (token: string): boolean => {
+  return Boolean(token && (token.startsWith('admin-session-token') || token.startsWith('pegawai-session-token') || token.startsWith('session-')));
+};
 
 export const dbSimulator = {
   // 1. PRODUCTS API
@@ -305,9 +332,9 @@ export const dbSimulator = {
   },
 
   createProduct: async (productData: Omit<Product, 'id' | 'created_at'>, token: string): Promise<Product> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       logSecurityEvent('UNAUTHORIZED_ACCESS', 'Percobaan menambah produk tanpa token valid', 'WARNING');
-      throw new Error('403 Forbidden: Anda bukan admin.');
+      throw new Error('403 Forbidden: Sesi tidak sah.');
     }
     const products: Product[] = JSON.parse(localStorage.getItem('tb_products') || '[]');
     const newProduct: Product = {
@@ -324,39 +351,53 @@ export const dbSimulator = {
   },
 
   updateProduct: async (id: string, productData: Partial<Product>, token: string): Promise<Product> => {
-    if (token !== 'admin-session-token') {
-      logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan mengubah produk ${id} tanpa token`, 'WARNING');
-      throw new Error('403 Forbidden');
+    if (!isValidSessionToken(token)) {
+      logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan ubah produk ${id} tanpa token`, 'WARNING');
+      throw new Error('403 Forbidden: Sesi tidak sah.');
     }
     const products: Product[] = JSON.parse(localStorage.getItem('tb_products') || '[]');
     const index = products.findIndex(p => p.id === id);
     if (index === -1) throw new Error('Produk tidak ditemukan');
 
-    const updatedProduct = {
+    const updated = {
       ...products[index],
       ...productData,
       name: productData.name ? sanitizeInput(productData.name) : products[index].name,
       description: productData.description ? sanitizeInput(productData.description) : products[index].description
     };
-    products[index] = updatedProduct;
+    products[index] = updated;
     localStorage.setItem('tb_products', JSON.stringify(products));
-    logSecurityEvent('PRODUCT_UPDATED', `Produk diubah: ${updatedProduct.name}`, 'SUCCESS');
-    return updatedProduct;
+    logSecurityEvent('PRODUCT_UPDATED', `Produk ${id} diperbarui: ${updated.name}`, 'SUCCESS');
+    return updated;
+  },
+
+  updateProductStock: async (id: string, newStock: number, token: string): Promise<Product> => {
+    if (!isValidSessionToken(token)) {
+      throw new Error('403 Forbidden: Sesi tidak sah.');
+    }
+    const products: Product[] = JSON.parse(localStorage.getItem('tb_products') || '[]');
+    const index = products.findIndex(p => p.id === id);
+    if (index === -1) throw new Error('Produk tidak ditemukan');
+
+    products[index].stock = Math.max(0, newStock);
+    localStorage.setItem('tb_products', JSON.stringify(products));
+    logSecurityEvent('STOCK_UPDATED', `Stok produk "${products[index].name}" diperbarui menjadi ${newStock}`, 'SUCCESS');
+    return products[index];
   },
 
   deleteProduct: async (id: string, token: string): Promise<boolean> => {
-    if (token !== 'admin-session-token') {
-      logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan menghapus produk ${id} tanpa token`, 'WARNING');
-      throw new Error('403 Forbidden');
+    if (!isValidSessionToken(token)) {
+      logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan hapus produk ${id} tanpa token`, 'WARNING');
+      throw new Error('403 Forbidden: Sesi tidak sah.');
     }
     const products: Product[] = JSON.parse(localStorage.getItem('tb_products') || '[]');
     const filtered = products.filter(p => p.id !== id);
     localStorage.setItem('tb_products', JSON.stringify(filtered));
-    logSecurityEvent('PRODUCT_DELETED', `Produk dengan ID ${id} dihapus`, 'SUCCESS');
+    logSecurityEvent('PRODUCT_DELETED', `Produk ID ${id} dihapus dari katalog`, 'SUCCESS');
     return true;
   },
 
-  // 2. ORDERS API (Public Insert, Admin View/Update)
+  // 2. ORDERS & ORDER ITEMS
   createOrder: async (orderData: {
     customer_name: string;
     customer_phone: string;
@@ -364,41 +405,24 @@ export const dbSimulator = {
     address?: string;
     items: { product_id: string; quantity: number }[];
   }): Promise<Order> => {
-    // Validasi input sisi server (Simulator)
-    if (!orderData.customer_name || orderData.customer_name.trim().length === 0) {
-      throw new Error('Nama pelanggan wajib diisi.');
-    }
-    if (!/^[0-9+ \-]+$/.test(orderData.customer_phone)) {
-      throw new Error('Format nomor telepon tidak valid.');
-    }
-    if (orderData.items.length === 0) {
-      throw new Error('Keranjang belanja kosong.');
-    }
-
     const products: Product[] = JSON.parse(localStorage.getItem('tb_products') || '[]');
     const orders: Order[] = JSON.parse(localStorage.getItem('tb_orders') || '[]');
     const orderItems: OrderItem[] = JSON.parse(localStorage.getItem('tb_order_items') || '[]');
 
-    const orderId = 'order-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+    if (!orderData.customer_name.trim()) throw new Error('Nama pelanggan wajib diisi');
+    if (!/^[0-9+ \-]+$/.test(orderData.customer_phone)) throw new Error('Nomor HP tidak valid');
+    if (orderData.items.length === 0) throw new Error('Keranjang belanja kosong');
+
+    const orderId = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
     let calculatedTotalPrice = 0;
     const addedItems: OrderItem[] = [];
 
-    // Validasi Integritas Data & Stok (Security Check)
     for (const item of orderData.items) {
       const dbProduct = products.find(p => p.id === item.product_id);
-      if (!dbProduct) {
-        throw new Error(`Produk dengan ID ${item.product_id} tidak ditemukan.`);
-      }
-      if (dbProduct.stock < item.quantity) {
-        throw new Error(`Stok untuk produk "${dbProduct.name}" tidak mencukupi.`);
-      }
-      if (item.quantity <= 0) {
-        throw new Error('Jumlah pemesanan item harus lebih dari 0.');
-      }
+      if (!dbProduct) throw new Error(`Produk dengan ID ${item.product_id} tidak ditemukan`);
+      if (dbProduct.stock < item.quantity) throw new Error(`Stok produk "${dbProduct.name}" tidak mencukupi (tersisa: ${dbProduct.stock})`);
 
-      // Potong stok produk
       dbProduct.stock -= item.quantity;
-
       const itemPrice = dbProduct.price * item.quantity;
       calculatedTotalPrice += itemPrice;
 
@@ -413,24 +437,22 @@ export const dbSimulator = {
       addedItems.push(newOrderItem);
     }
 
-    // Buat objek order baru
     const newOrder: Order = {
       id: orderId,
       customer_name: sanitizeInput(orderData.customer_name),
       customer_phone: sanitizeInput(orderData.customer_phone),
       delivery_method: orderData.delivery_method,
       address: orderData.address ? sanitizeInput(orderData.address) : undefined,
-      total_price: calculatedTotalPrice, // Kalkulasi di server, bukan percaya dari client
+      total_price: calculatedTotalPrice,
       status: 'Pending',
       created_at: new Date().toISOString()
     };
 
-    // Simpan ke database
     orders.push(newOrder);
     orderItems.push(...addedItems);
     localStorage.setItem('tb_orders', JSON.stringify(orders));
     localStorage.setItem('tb_order_items', JSON.stringify(orderItems));
-    localStorage.setItem('tb_products', JSON.stringify(products)); // Update stok terpotong
+    localStorage.setItem('tb_products', JSON.stringify(products));
 
     logSecurityEvent('ORDER_CREATED', `Pesanan dibuat: ${orderId} senilai Rp${calculatedTotalPrice.toLocaleString()}`, 'SUCCESS');
 
@@ -438,14 +460,13 @@ export const dbSimulator = {
   },
 
   getOrders: async (token: string): Promise<Order[]> => {
-    if (token !== 'admin-session-token') {
-      logSecurityEvent('UNAUTHORIZED_ACCESS', 'Percobaan melihat semua pesanan tanpa token', 'WARNING');
+    if (!isValidSessionToken(token)) {
+      logSecurityEvent('UNAUTHORIZED_ACCESS', 'Percobaan melihat pesanan tanpa token valid', 'WARNING');
       throw new Error('403 Forbidden');
     }
     const orders: Order[] = JSON.parse(localStorage.getItem('tb_orders') || '[]');
     const orderItems: OrderItem[] = JSON.parse(localStorage.getItem('tb_order_items') || '[]');
 
-    // Gabungkan item ke order masing-masing
     return orders.map(order => ({
       ...order,
       items: orderItems.filter(item => item.order_id === order.id)
@@ -456,7 +477,6 @@ export const dbSimulator = {
     const orders: Order[] = JSON.parse(localStorage.getItem('tb_orders') || '[]');
     const orderItems: OrderItem[] = JSON.parse(localStorage.getItem('tb_order_items') || '[]');
     
-    // Cari order (Public, tapi hanya berdasarkan ID unik pesanan)
     const sanitizedId = sanitizeInput(id);
     const order = orders.find(o => o.id === sanitizedId);
     if (!order) return null;
@@ -468,7 +488,7 @@ export const dbSimulator = {
   },
 
   updateOrderStatus: async (id: string, status: 'Pending' | 'Diproses' | 'Selesai', token: string): Promise<Order> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan ubah status pesanan ${id} tanpa token`, 'WARNING');
       throw new Error('403 Forbidden');
     }
@@ -482,12 +502,11 @@ export const dbSimulator = {
     return orders[index];
   },
 
-  // 3. ADMIN AUTHENTICATION
-  adminLogin: async (usernameInput: string, passwordInput: string): Promise<{ success: boolean; token?: string; error?: string }> => {
+  // 3. AUTHENTICATION & ROLE MANAGMENT
+  adminLogin: async (usernameInput: string, passwordInput: string): Promise<{ success: boolean; token?: string; role?: UserRole; name?: string; error?: string }> => {
     const now = Date.now();
-    const userIP = 'client-browser'; // Simulasi IP
+    const userIP = 'client-browser';
 
-    // Rate Limiting Check (Security Check)
     if (LOGIN_ATTEMPTS[userIP] && LOGIN_ATTEMPTS[userIP].blockedUntil > now) {
       const remainingSeconds = Math.ceil((LOGIN_ATTEMPTS[userIP].blockedUntil - now) / 1000);
       logSecurityEvent('BRUTE_FORCE_BLOCKED', `Percobaan login dari IP diblokir selama ${remainingSeconds} detik`, 'WARNING');
@@ -497,60 +516,132 @@ export const dbSimulator = {
       };
     }
 
-    const adminCreds = JSON.parse(localStorage.getItem('tb_admin_user') || '{}');
+    const userAccounts: UserAccount[] = JSON.parse(localStorage.getItem('tb_user_accounts') || '[]');
     const inputHash = await sha256(passwordInput);
 
-    // Keamanan Berlapis: Verifikasi hash, dengan fallback plain-text jika SubtleCrypto tidak aktif pada context HTTP
-    const isValidPassword = inputHash === adminCreds.passwordHash || passwordInput === 'adminTiara123!';
-    const isValidUsername = usernameInput === adminCreds.username;
+    // Cari user berdasarkan username
+    const foundUser = userAccounts.find(u => u.username.toLowerCase() === usernameInput.toLowerCase().trim());
 
-    if (isValidUsername && isValidPassword) {
-      // Login Sukses: reset percobaan gagal
+    if (foundUser) {
+      const isValidPassword = inputHash === foundUser.passwordHash ||
+        (foundUser.username === 'admin' && passwordInput === 'adminTiara123!') ||
+        (foundUser.username === 'pegawai' && passwordInput === 'pegawaiTiara123!');
+
+      if (isValidPassword) {
+        LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
+        logSecurityEvent('USER_LOGIN', `Pengguna "${foundUser.username}" (${foundUser.role.toUpperCase()}) berhasil masuk ke dasbor`, 'SUCCESS');
+        return {
+          success: true,
+          token: `session-${foundUser.role}-${Date.now()}`,
+          role: foundUser.role,
+          name: foundUser.name
+        };
+      }
+    }
+
+    // Fallback legacy admin
+    if (usernameInput === 'admin' && passwordInput === 'adminTiara123!') {
       LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
       logSecurityEvent('ADMIN_LOGIN', 'Admin berhasil masuk ke dashboard', 'SUCCESS');
       return {
         success: true,
-        token: 'admin-session-token' // Token sesi simulasi
-      };
-    } else {
-      // Login Gagal: catat percobaan
-      if (!LOGIN_ATTEMPTS[userIP]) {
-        LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
-      }
-      LOGIN_ATTEMPTS[userIP].count += 1;
-
-      if (LOGIN_ATTEMPTS[userIP].count >= 5) {
-        LOGIN_ATTEMPTS[userIP].blockedUntil = now + 60000; // Blokir selama 1 menit
-        logSecurityEvent('IP_BLOCKED', 'IP diblokir sementara karena 5x gagal login', 'WARNING');
-        return {
-          success: false,
-          error: 'Terlalu banyak percobaan gagal. Akses diblokir selama 60 detik.'
-        };
-      }
-
-      logSecurityEvent('ADMIN_LOGIN_FAILED', `Gagal login dengan username: ${sanitizeInput(usernameInput)} (Percobaan ${LOGIN_ATTEMPTS[userIP].count}/5)`, 'FAILED');
-      return {
-        success: false,
-        error: `Username atau password salah. Sisa percobaan: ${5 - LOGIN_ATTEMPTS[userIP].count}`
+        token: 'admin-session-token',
+        role: 'admin',
+        name: 'Administrator (Owner)'
       };
     }
+
+    // Fallback pegawai
+    if (usernameInput === 'pegawai' && passwordInput === 'pegawaiTiara123!') {
+      LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
+      logSecurityEvent('PEGAWAI_LOGIN', 'Pegawai kasir berhasil masuk ke dashboard', 'SUCCESS');
+      return {
+        success: true,
+        token: 'pegawai-session-token',
+        role: 'pegawai',
+        name: 'Budi (Staf Kasir)'
+      };
+    }
+
+    if (!LOGIN_ATTEMPTS[userIP]) {
+      LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
+    }
+    LOGIN_ATTEMPTS[userIP].count += 1;
+
+    if (LOGIN_ATTEMPTS[userIP].count >= 5) {
+      LOGIN_ATTEMPTS[userIP].blockedUntil = now + 60000;
+      logSecurityEvent('IP_BLOCKED', 'IP diblokir sementara karena 5x gagal login', 'WARNING');
+      return {
+        success: false,
+        error: 'Terlalu banyak percobaan gagal. Akses diblokir selama 60 detik.'
+      };
+    }
+
+    logSecurityEvent('LOGIN_FAILED', `Gagal login username: ${sanitizeInput(usernameInput)} (Percobaan ${LOGIN_ATTEMPTS[userIP].count}/5)`, 'FAILED');
+    return {
+      success: false,
+      error: `Username atau password salah. Sisa percobaan: ${5 - LOGIN_ATTEMPTS[userIP].count}`
+    };
   },
 
-  // 4. SECURITY LOGS (Hanya Admin)
+  // 4. MANAGEMENT AKUN PEGAWAI (Khusus Admin)
+  getStaffAccounts: async (token: string): Promise<UserAccount[]> => {
+    if (!token.includes('admin')) {
+      throw new Error('403 Forbidden: Hanya Admin yang bisa mengelola akun.');
+    }
+    return JSON.parse(localStorage.getItem('tb_user_accounts') || '[]');
+  },
+
+  createStaffAccount: async (data: { username: string; name: string; password: string; role: UserRole }, token: string): Promise<UserAccount> => {
+    if (!token.includes('admin')) {
+      throw new Error('403 Forbidden: Hanya Admin yang bisa menambah akun.');
+    }
+    const accounts: UserAccount[] = JSON.parse(localStorage.getItem('tb_user_accounts') || '[]');
+    if (accounts.some(a => a.username.toLowerCase() === data.username.toLowerCase().trim())) {
+      throw new Error('Username sudah digunakan!');
+    }
+
+    const hash = await sha256(data.password);
+    const newAccount: UserAccount = {
+      id: 'user-' + Math.random().toString(36).substr(2, 9),
+      username: sanitizeInput(data.username.trim()),
+      name: sanitizeInput(data.name.trim()),
+      role: data.role,
+      passwordHash: hash,
+      created_at: new Date().toISOString()
+    };
+    accounts.push(newAccount);
+    localStorage.setItem('tb_user_accounts', JSON.stringify(accounts));
+    logSecurityEvent('STAFF_ACCOUNT_CREATED', `Akun staf baru ditambahkan: ${newAccount.username} (${newAccount.role})`, 'SUCCESS');
+    return newAccount;
+  },
+
+  deleteStaffAccount: async (id: string, token: string): Promise<boolean> => {
+    if (!token.includes('admin')) {
+      throw new Error('403 Forbidden: Hanya Admin yang bisa menghapus akun.');
+    }
+    const accounts: UserAccount[] = JSON.parse(localStorage.getItem('tb_user_accounts') || '[]');
+    const filtered = accounts.filter(a => a.id !== id);
+    localStorage.setItem('tb_user_accounts', JSON.stringify(filtered));
+    logSecurityEvent('STAFF_ACCOUNT_DELETED', `Akun staf ${id} dihapus`, 'SUCCESS');
+    return true;
+  },
+
+  // 5. SECURITY LOGS (Khusus Admin)
   getSecurityLogs: async (token: string): Promise<any[]> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       throw new Error('403 Forbidden');
     }
     return JSON.parse(localStorage.getItem('tb_security_logs') || '[]');
   },
 
-  // 5. CHATBOT CONFIG & KNOWLEDGE (ADMIN & USER PUBLIC READ)
+  // 6. CHATBOT CONFIG & KNOWLEDGE
   getChatbotSettings: async (): Promise<ChatbotSettings> => {
     return JSON.parse(localStorage.getItem('tb_chatbot_settings') || '{}');
   },
 
   updateChatbotSettings: async (settingsData: Partial<ChatbotSettings>, token: string): Promise<ChatbotSettings> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       logSecurityEvent('UNAUTHORIZED_ACCESS', 'Percobaan ubah pengaturan chatbot tanpa token valid', 'WARNING');
       throw new Error('403 Forbidden');
     }
@@ -566,7 +657,7 @@ export const dbSimulator = {
   },
 
   createChatbotKnowledge: async (knowData: Omit<ChatbotKnowledge, 'id' | 'created_at'>, token: string): Promise<ChatbotKnowledge> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       logSecurityEvent('UNAUTHORIZED_ACCESS', 'Percobaan tambah pengetahuan chatbot tanpa token valid', 'WARNING');
       throw new Error('403 Forbidden');
     }
@@ -586,7 +677,7 @@ export const dbSimulator = {
   },
 
   updateChatbotKnowledge: async (id: string, knowData: Partial<ChatbotKnowledge>, token: string): Promise<ChatbotKnowledge> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan edit pengetahuan chatbot ${id} tanpa token`, 'WARNING');
       throw new Error('403 Forbidden');
     }
@@ -608,7 +699,7 @@ export const dbSimulator = {
   },
 
   deleteChatbotKnowledge: async (id: string, token: string): Promise<boolean> => {
-    if (token !== 'admin-session-token') {
+    if (!isValidSessionToken(token)) {
       logSecurityEvent('UNAUTHORIZED_ACCESS', `Percobaan hapus pengetahuan chatbot ${id} tanpa token`, 'WARNING');
       throw new Error('403 Forbidden');
     }

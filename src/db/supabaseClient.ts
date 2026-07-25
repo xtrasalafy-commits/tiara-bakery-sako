@@ -4,7 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { dbSimulator } from './dbSimulator';
-import type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge } from './dbSimulator';
+import type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge, UserRole, UserAccount } from './dbSimulator';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -17,7 +17,7 @@ export const supabase = isSupabaseConfigured
   : null;
 
 // Ekspor tipe data
-export type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge };
+export type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge, UserRole, UserAccount };
 
 // Unified DB Interface: Menjamin kode frontend memanggil fungsi database yang sama
 export const db = {
@@ -93,6 +93,24 @@ export const db = {
       }
     }
     return dbSimulator.updateProduct(id, productData, token);
+  },
+
+  updateProductStock: async (id: string, newStock: number, token: string): Promise<Product> => {
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .update({ stock: newStock })
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) throw error;
+        return data as Product;
+      } catch (e) {
+        return dbSimulator.updateProductStock(id, newStock, token);
+      }
+    }
+    return dbSimulator.updateProductStock(id, newStock, token);
   },
 
   deleteProduct: async (id: string, token: string): Promise<boolean> => {
@@ -272,15 +290,13 @@ export const db = {
     return dbSimulator.updateOrderStatus(id, status, token);
   },
 
-  // 3. ADMIN AUTH WITH AUTOMATIC FALLBACK
-  adminLogin: async (usernameInput: string, passwordInput: string): Promise<{ success: boolean; token?: string; error?: string }> => {
-    // 1. Coba login ke simulator lokal terlebih dahulu jika kredensial cocok dengan demo lokal (admin / adminTiara123!)
+  // 3. AUTHENTICATION WITH ROLE SUPPORT
+  adminLogin: async (usernameInput: string, passwordInput: string): Promise<{ success: boolean; token?: string; role?: UserRole; name?: string; error?: string }> => {
     const localRes = await dbSimulator.adminLogin(usernameInput, passwordInput);
     if (localRes.success) {
       return localRes;
     }
 
-    // 2. Jika bukan kredensial lokal dan Supabase terkonfigurasi, coba otentikasi ke Supabase Auth
     if (supabase) {
       try {
         const email = usernameInput.includes('@') ? usernameInput : `${usernameInput}@tiarabakery.com`;
@@ -289,17 +305,20 @@ export const db = {
           password: passwordInput
         });
         if (error) throw error;
+        const role: UserRole = usernameInput.toLowerCase().includes('pegawai') ? 'pegawai' : 'admin';
         return {
           success: true,
-          token: data.session?.access_token
+          token: data.session?.access_token,
+          role: role,
+          name: data.user?.user_metadata?.full_name || usernameInput
         };
       } catch (err: any) {
         const isNetworkErr = err.message === 'Failed to fetch' || err.name === 'AuthRetryableFetchError';
         return {
           success: false,
           error: isNetworkErr
-            ? 'Gagal terhubung ke server Supabase (Failed to fetch). Gunakan kredensial lokal: admin / adminTiara123! atau periksa koneksi & URL Supabase di .env.'
-            : (err.message || 'Username atau password admin salah.')
+            ? 'Gagal terhubung ke server Supabase (Failed to fetch). Gunakan kredensial lokal: admin / adminTiara123! atau pegawai / pegawaiTiara123!.'
+            : (err.message || 'Username atau password salah.')
         };
       }
     }
@@ -307,12 +326,25 @@ export const db = {
     return localRes;
   },
 
-  // 4. SECURITY LOGS
+  // 4. MANAGEMENT AKUN STAF / PEGAWAI (Khusus Admin)
+  getStaffAccounts: async (token: string): Promise<UserAccount[]> => {
+    return dbSimulator.getStaffAccounts(token);
+  },
+
+  createStaffAccount: async (data: { username: string; name: string; password: string; role: UserRole }, token: string): Promise<UserAccount> => {
+    return dbSimulator.createStaffAccount(data, token);
+  },
+
+  deleteStaffAccount: async (id: string, token: string): Promise<boolean> => {
+    return dbSimulator.deleteStaffAccount(id, token);
+  },
+
+  // 5. SECURITY LOGS
   getSecurityLogs: async (token: string): Promise<any[]> => {
     return dbSimulator.getSecurityLogs(token);
   },
 
-  // 5. CHATBOT CONFIG & KNOWLEDGE
+  // 6. CHATBOT CONFIG & KNOWLEDGE
   getChatbotSettings: async (): Promise<ChatbotSettings> => {
     if (supabase) {
       try {
