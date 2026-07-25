@@ -4,7 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { dbSimulator } from './dbSimulator';
-import type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge, UserRole, UserAccount } from './dbSimulator';
+import type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge, UserRole, UserAccount, Expense, ExpenseCategory } from './dbSimulator';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -17,7 +17,7 @@ export const supabase = isSupabaseConfigured
   : null;
 
 // Ekspor tipe data
-export type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge, UserRole, UserAccount };
+export type { Product, Order, OrderItem, ChatbotSettings, ChatbotKnowledge, UserRole, UserAccount, Expense, ExpenseCategory };
 
 // Unified DB Interface: Menjamin kode frontend memanggil fungsi database yang sama
 export const db = {
@@ -290,7 +290,57 @@ export const db = {
     return dbSimulator.updateOrderStatus(id, status, token);
   },
 
-  // 3. AUTHENTICATION WITH ROLE SUPPORT
+  // 3. EXPENSES API (Pencatatan Biaya UMKM)
+  getExpenses: async (): Promise<Expense[]> => {
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('expenses')
+          .select('*')
+          .order('expense_date', { ascending: false });
+        if (error || !data) return dbSimulator.getExpenses();
+        return data as Expense[];
+      } catch (e) {
+        return dbSimulator.getExpenses();
+      }
+    }
+    return dbSimulator.getExpenses();
+  },
+
+  createExpense: async (expData: Omit<Expense, 'id' | 'created_at'>, token: string): Promise<Expense> => {
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('expenses')
+          .insert([expData])
+          .select()
+          .single();
+        if (error) throw error;
+        return data as Expense;
+      } catch (e) {
+        return dbSimulator.createExpense(expData, token);
+      }
+    }
+    return dbSimulator.createExpense(expData, token);
+  },
+
+  deleteExpense: async (id: string, token: string): Promise<boolean> => {
+    if (supabase) {
+      try {
+        const { error } = await supabase
+          .from('expenses')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
+        return true;
+      } catch (e) {
+        return dbSimulator.deleteExpense(id, token);
+      }
+    }
+    return dbSimulator.deleteExpense(id, token);
+  },
+
+  // 4. AUTHENTICATION WITH ROLE SUPPORT
   adminLogin: async (usernameInput: string, passwordInput: string): Promise<{ success: boolean; token?: string; role?: UserRole; name?: string; error?: string }> => {
     const localRes = await dbSimulator.adminLogin(usernameInput, passwordInput);
     if (localRes.success) {
@@ -326,7 +376,7 @@ export const db = {
     return localRes;
   },
 
-  // 4. MANAGEMENT AKUN STAF / PEGAWAI (Khusus Admin)
+  // 5. MANAGEMENT AKUN STAF / PEGAWAI (Khusus Admin)
   getStaffAccounts: async (token: string): Promise<UserAccount[]> => {
     return dbSimulator.getStaffAccounts(token);
   },
@@ -339,12 +389,12 @@ export const db = {
     return dbSimulator.deleteStaffAccount(id, token);
   },
 
-  // 5. SECURITY LOGS
+  // 6. SECURITY LOGS
   getSecurityLogs: async (token: string): Promise<any[]> => {
     return dbSimulator.getSecurityLogs(token);
   },
 
-  // 6. CHATBOT CONFIG & KNOWLEDGE
+  // 7. CHATBOT CONFIG & KNOWLEDGE
   getChatbotSettings: async (): Promise<ChatbotSettings> => {
     if (supabase) {
       try {

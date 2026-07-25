@@ -59,7 +59,18 @@ export interface UserAccount {
   created_at: string;
 }
 
-// Seed Data Awal sesuai schema.sql
+export type ExpenseCategory = 'Bahan Baku' | 'Operasional Toko' | 'Gaji/Bonus Staf' | 'Lain-lain';
+
+export interface Expense {
+  id: string;
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  expense_date: string;
+  created_at: string;
+}
+
+// Seed Data Awal Produk sesuai schema.sql
 const INITIAL_PRODUCTS: Product[] = [
   {
     id: 'prod-1',
@@ -87,7 +98,7 @@ const INITIAL_PRODUCTS: Product[] = [
     description: 'Roti tawar gandum tinggi serat yang sehat dan gurih.',
     price: 15000,
     category: 'Roti',
-    stock: 15,
+    stock: 4, // untuk demonstrasi Peringatan Stok Kritis (<=5)
     image_url: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&q=80&w=400',
     created_at: new Date().toISOString()
   },
@@ -117,7 +128,7 @@ const INITIAL_PRODUCTS: Product[] = [
     description: 'Kue basah kukus tradisional yang merekah manis dan lembut.',
     price: 3500,
     category: 'Kue Basah',
-    stock: 40,
+    stock: 3, // demonstrasi Stok Kritis
     image_url: 'https://images.unsplash.com/photo-1550617931-e17a7b70dce2?auto=format&fit=crop&q=80&w=400',
     created_at: new Date().toISOString()
   },
@@ -183,7 +194,7 @@ const INITIAL_PRODUCTS: Product[] = [
   }
 ];
 
-// Helper untuk hash password sederhana (dengan fallback aman untuk non-secure HTTP / local IP)
+// Helper hash password
 const sha256 = async (message: string): Promise<string> => {
   try {
     if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
@@ -204,20 +215,89 @@ const initDB = () => {
     localStorage.setItem('tb_products', JSON.stringify(INITIAL_PRODUCTS));
   }
   if (!localStorage.getItem('tb_orders')) {
-    localStorage.setItem('tb_orders', JSON.stringify([]));
+    // Seed beberapa pesanan sampel untuk analitik awal
+    const sampleOrders: Order[] = [
+      {
+        id: 'ORD-892103',
+        customer_name: 'Budi Santoso',
+        customer_phone: '081234567891',
+        delivery_method: 'Kirim ke Rumah',
+        address: 'Jl. Sako Raya No. 12, Palembang',
+        total_price: 93000,
+        status: 'Selesai',
+        created_at: new Date().toISOString(),
+        items: [
+          { id: 'it-1', order_id: 'ORD-892103', product_id: 'prod-1', product_name: 'Roti Manis Cokelat', quantity: 1, price_at_purchase: 8000 },
+          { id: 'it-2', order_id: 'ORD-892103', product_id: 'prod-7', product_name: 'Nastar Klasik Wisman', quantity: 1, price_at_purchase: 85000 }
+        ]
+      },
+      {
+        id: 'ORD-719401',
+        customer_name: 'Siti Rahma',
+        customer_phone: '085298765432',
+        delivery_method: 'Ambil Sendiri',
+        total_price: 36000,
+        status: 'Selesai',
+        created_at: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
+        items: [
+          { id: 'it-3', order_id: 'ORD-719401', product_id: 'prod-2', product_name: 'Roti Sobek Keju', quantity: 2, price_at_purchase: 18000 }
+        ]
+      }
+    ];
+    localStorage.setItem('tb_orders', JSON.stringify(sampleOrders));
   }
+
   if (!localStorage.getItem('tb_order_items')) {
     localStorage.setItem('tb_order_items', JSON.stringify([]));
   }
+
+  // Seed Initial Expenses
+  if (!localStorage.getItem('tb_expenses')) {
+    const defaultExpenses: Expense[] = [
+      {
+        id: 'exp-1',
+        category: 'Bahan Baku',
+        description: 'Pembelian Tepung Terigu Segitiga Biru 25kg & Mentega Wisman',
+        amount: 450000,
+        expense_date: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'exp-2',
+        category: 'Bahan Baku',
+        description: 'Pembelian Cokelat Belgia & Keju Cheddar 5kg',
+        amount: 380000,
+        expense_date: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'exp-3',
+        category: 'Operasional Toko',
+        description: 'Pembelian Kotak Kemasan & Plastik Tiara Bakery',
+        amount: 150000,
+        expense_date: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
+        created_at: new Date().toISOString()
+      },
+      {
+        id: 'exp-4',
+        category: 'Gaji/Bonus Staf',
+        description: 'Bonus Harian Staf Kasir & Pemanggang Roti',
+        amount: 200000,
+        expense_date: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString(),
+        created_at: new Date().toISOString()
+      }
+    ];
+    localStorage.setItem('tb_expenses', JSON.stringify(defaultExpenses));
+  }
   
-  // Inisialisasi Akun Pengguna (Admin & Pegawai)
+  // Inisialisasi Akun Pengguna
   const defaultUsers: UserAccount[] = [
     {
       id: 'user-admin',
       username: 'admin',
       name: 'Administrator (Owner)',
       role: 'admin',
-      passwordHash: 'e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db', // adminTiara123!
+      passwordHash: 'e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db',
       created_at: new Date().toISOString()
     },
     {
@@ -225,7 +305,7 @@ const initDB = () => {
       username: 'pegawai',
       name: 'Budi (Staf Kasir)',
       role: 'pegawai',
-      passwordHash: 'a587eeedef2ebfdfa40c62ff92429a1b154a4f8d22bb425c2ee035c9118e6cb0', // pegawaiTiara123!
+      passwordHash: 'a587eeedef2ebfdfa40c62ff92429a1b154a4f8d22bb425c2ee035c9118e6cb0',
       created_at: new Date().toISOString()
     }
   ];
@@ -234,12 +314,10 @@ const initDB = () => {
     localStorage.setItem('tb_user_accounts', JSON.stringify(defaultUsers));
   }
 
-  // Log Security Events
   if (!localStorage.getItem('tb_security_logs')) {
     localStorage.setItem('tb_security_logs', JSON.stringify([]));
   }
 
-  // Seeding Chatbot Settings
   if (!localStorage.getItem('tb_chatbot_settings')) {
     const defaultSettings: ChatbotSettings = {
       botName: 'Tiara',
@@ -249,7 +327,6 @@ const initDB = () => {
     localStorage.setItem('tb_chatbot_settings', JSON.stringify(defaultSettings));
   }
   
-  // Seeding Chatbot Knowledge FAQs
   if (!localStorage.getItem('tb_chatbot_knowledge')) {
     const defaultKnowledge: ChatbotKnowledge[] = [
       {
@@ -287,7 +364,7 @@ const initDB = () => {
 
 initDB();
 
-// Input Sanitization helper untuk mencegah XSS
+// Input Sanitization helper
 export const sanitizeInput = (text: string): string => {
   return text
     .replace(/&/g, '&amp;')
@@ -298,7 +375,6 @@ export const sanitizeInput = (text: string): string => {
     .replace(/\//g, '&#x2F;');
 };
 
-// Helper mencatat log keamanan
 export const logSecurityEvent = (eventType: string, detail: string, status: 'SUCCESS' | 'WARNING' | 'FAILED') => {
   const logs = JSON.parse(localStorage.getItem('tb_security_logs') || '[]');
   const newLog = {
@@ -310,10 +386,9 @@ export const logSecurityEvent = (eventType: string, detail: string, status: 'SUC
     ipSimulated: '192.168.1.' + Math.floor(Math.random() * 254 + 1)
   };
   logs.unshift(newLog);
-  localStorage.setItem('tb_security_logs', JSON.stringify(logs.slice(0, 100))); // Simpan max 100 logs
+  localStorage.setItem('tb_security_logs', JSON.stringify(logs.slice(0, 100)));
 };
 
-// Rate Limiter Simulator
 const LOGIN_ATTEMPTS: { [key: string]: { count: number; blockedUntil: number } } = {};
 
 const isValidSessionToken = (token: string): boolean => {
@@ -502,7 +577,42 @@ export const dbSimulator = {
     return orders[index];
   },
 
-  // 3. AUTHENTICATION & ROLE MANAGMENT
+  // 3. EXPENSES API (Pengeluaran UMKM)
+  getExpenses: async (): Promise<Expense[]> => {
+    return JSON.parse(localStorage.getItem('tb_expenses') || '[]');
+  },
+
+  createExpense: async (expData: Omit<Expense, 'id' | 'created_at'>, token: string): Promise<Expense> => {
+    if (!isValidSessionToken(token)) {
+      throw new Error('403 Forbidden: Sesi tidak sah.');
+    }
+    const expenses: Expense[] = JSON.parse(localStorage.getItem('tb_expenses') || '[]');
+    const newExp: Expense = {
+      ...expData,
+      id: 'exp-' + Math.random().toString(36).substr(2, 9),
+      description: sanitizeInput(expData.description),
+      amount: Number(expData.amount),
+      expense_date: expData.expense_date || new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+    expenses.unshift(newExp);
+    localStorage.setItem('tb_expenses', JSON.stringify(expenses));
+    logSecurityEvent('EXPENSE_CREATED', `Pengeluaran baru dicatat: ${newExp.description} (Rp${newExp.amount.toLocaleString()})`, 'SUCCESS');
+    return newExp;
+  },
+
+  deleteExpense: async (id: string, token: string): Promise<boolean> => {
+    if (!isValidSessionToken(token)) {
+      throw new Error('403 Forbidden: Sesi tidak sah.');
+    }
+    const expenses: Expense[] = JSON.parse(localStorage.getItem('tb_expenses') || '[]');
+    const filtered = expenses.filter(e => e.id !== id);
+    localStorage.setItem('tb_expenses', JSON.stringify(filtered));
+    logSecurityEvent('EXPENSE_DELETED', `Catatan pengeluaran ID ${id} dihapus`, 'SUCCESS');
+    return true;
+  },
+
+  // 4. AUTHENTICATION & ROLE MANAGMENT
   adminLogin: async (usernameInput: string, passwordInput: string): Promise<{ success: boolean; token?: string; role?: UserRole; name?: string; error?: string }> => {
     const now = Date.now();
     const userIP = 'client-browser';
@@ -519,7 +629,6 @@ export const dbSimulator = {
     const userAccounts: UserAccount[] = JSON.parse(localStorage.getItem('tb_user_accounts') || '[]');
     const inputHash = await sha256(passwordInput);
 
-    // Cari user berdasarkan username
     const foundUser = userAccounts.find(u => u.username.toLowerCase() === usernameInput.toLowerCase().trim());
 
     if (foundUser) {
@@ -539,7 +648,6 @@ export const dbSimulator = {
       }
     }
 
-    // Fallback legacy admin
     if (usernameInput === 'admin' && passwordInput === 'adminTiara123!') {
       LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
       logSecurityEvent('ADMIN_LOGIN', 'Admin berhasil masuk ke dashboard', 'SUCCESS');
@@ -551,7 +659,6 @@ export const dbSimulator = {
       };
     }
 
-    // Fallback pegawai
     if (usernameInput === 'pegawai' && passwordInput === 'pegawaiTiara123!') {
       LOGIN_ATTEMPTS[userIP] = { count: 0, blockedUntil: 0 };
       logSecurityEvent('PEGAWAI_LOGIN', 'Pegawai kasir berhasil masuk ke dashboard', 'SUCCESS');
@@ -584,7 +691,7 @@ export const dbSimulator = {
     };
   },
 
-  // 4. MANAGEMENT AKUN PEGAWAI (Khusus Admin)
+  // 5. MANAGEMENT AKUN STAF (Khusus Admin)
   getStaffAccounts: async (token: string): Promise<UserAccount[]> => {
     if (!token.includes('admin')) {
       throw new Error('403 Forbidden: Hanya Admin yang bisa mengelola akun.');
@@ -627,7 +734,7 @@ export const dbSimulator = {
     return true;
   },
 
-  // 5. SECURITY LOGS (Khusus Admin)
+  // 6. SECURITY LOGS (Khusus Admin)
   getSecurityLogs: async (token: string): Promise<any[]> => {
     if (!isValidSessionToken(token)) {
       throw new Error('403 Forbidden');
@@ -635,7 +742,7 @@ export const dbSimulator = {
     return JSON.parse(localStorage.getItem('tb_security_logs') || '[]');
   },
 
-  // 6. CHATBOT CONFIG & KNOWLEDGE
+  // 7. CHATBOT CONFIG & KNOWLEDGE
   getChatbotSettings: async (): Promise<ChatbotSettings> => {
     return JSON.parse(localStorage.getItem('tb_chatbot_settings') || '{}');
   },

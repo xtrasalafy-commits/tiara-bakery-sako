@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Shield, Key, LogOut, Package, ShoppingBag, Terminal, Edit3, Trash2, Plus, 
-  AlertCircle, RefreshCw, X, MessageSquare, UserPlus, Store, Lock 
+  AlertCircle, RefreshCw, X, MessageSquare, UserPlus, Store, Lock,
+  BarChart3, DollarSign, TrendingUp, AlertTriangle, Printer, Wallet, Award, FileText
 } from 'lucide-react';
 import { db } from '../db/supabaseClient';
-import type { Product, Order, ChatbotKnowledge, UserRole, UserAccount } from '../db/supabaseClient';
+import type { Product, Order, ChatbotKnowledge, UserRole, UserAccount, Expense, ExpenseCategory } from '../db/supabaseClient';
 
 interface AdminPanelProps {
   products: Product[];
@@ -23,13 +24,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const [isLoading, setIsLoading] = useState(false);
 
   // Tab & Operational States
-  const [activeTab, setActiveTab] = useState<'orders' | 'products' | 'security' | 'chatbot'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'products' | 'analytics' | 'expenses' | 'security' | 'chatbot'>('orders');
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderFilter, setOrderFilter] = useState<'Semua' | 'Pending' | 'Diproses' | 'Selesai'>('Semua');
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [securityLogs, setSecurityLogs] = useState<any[]>([]);
   const [staffAccounts, setStaffAccounts] = useState<UserAccount[]>([]);
 
-  // State POS Kasir Modal (Buat Pesanan Langsung di Toko)
+  // Filter Periode Laporan (Hari Ini, Minggu Ini, Bulan Ini, Tahun Ini, Semua)
+  const [reportTimeframe, setReportTimeframe] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('month');
+
+  // State POS Kasir Modal
   const [showPosModal, setShowPosModal] = useState(false);
   const [posCustomerName, setPosCustomerName] = useState('Pelanggan Toko (Walk-in)');
   const [posCustomerPhone, setPosCustomerPhone] = useState('081234567890');
@@ -38,6 +43,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const [posCart, setPosCart] = useState<{ product_id: string; quantity: number }[]>([]);
   const [posError, setPosError] = useState('');
   const [posSuccess, setPosSuccess] = useState('');
+
+  // State Pengeluaran Modal
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [expCategory, setExpCategory] = useState<ExpenseCategory>('Bahan Baku');
+  const [expDescription, setExpDescription] = useState('');
+  const [expAmount, setExpAmount] = useState<number>(100000);
+  const [expDate, setExpDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [expError, setExpError] = useState('');
 
   // State CRUD Produk
   const [showProductModal, setShowProductModal] = useState(false);
@@ -66,7 +79,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   const [faqAnswer, setFaqAnswer] = useState('');
   const [faqError, setFaqError] = useState('');
 
-  // State Tambah Staf Baru (Khusus Admin)
+  // State Tambah Staf Baru
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
   const [newStaffUsername, setNewStaffUsername] = useState('');
   const [newStaffName, setNewStaffName] = useState('');
@@ -93,6 +106,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     try {
       const fetchedOrders = await db.getOrders(activeToken);
       setOrders(fetchedOrders);
+
+      const fetchedExpenses = await db.getExpenses();
+      setExpenses(fetchedExpenses);
 
       if (userRole === 'admin' || activeToken.includes('admin')) {
         const logs = await db.getSecurityLogs(activeToken);
@@ -156,7 +172,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // Quick Preset Login Handler
   const handleQuickLogin = (rolePreset: 'admin' | 'pegawai') => {
     if (rolePreset === 'admin') {
       setUsername('admin');
@@ -187,7 +202,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // Quick Update Stok Produk (Dapat diakses Admin & Pegawai)
+  // Quick Update Stok Produk
   const handleQuickStockUpdate = async (productId: string, newStock: number) => {
     try {
       await db.updateProductStock(productId, newStock, token);
@@ -198,7 +213,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // POS Kasir: Tambah/Kurang Item ke Keranjang POS
+  // POS Kasir Cart Handlers
   const handlePosAddToCart = (productId: string) => {
     const existing = posCart.find(i => i.product_id === productId);
     if (existing) {
@@ -249,7 +264,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // CRUD Produk Actions (Khusus Admin)
+  // Expenses Handlers
+  const handleSaveExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setExpError('');
+
+    if (!expDescription.trim() || expAmount <= 0) {
+      setExpError('Keterangan dan nominal pengeluaran wajib diisi!');
+      return;
+    }
+
+    try {
+      await db.createExpense({
+        category: expCategory,
+        description: expDescription,
+        amount: Number(expAmount),
+        expense_date: expDate ? new Date(expDate).toISOString() : new Date().toISOString()
+      }, token);
+
+      setShowExpenseModal(false);
+      setExpDescription('');
+      setExpAmount(100000);
+      await fetchAdminData(token);
+    } catch (err: any) {
+      setExpError(err.message || 'Gagal mencatat pengeluaran.');
+    }
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    if (!window.confirm('Hapus catatan pengeluaran ini?')) return;
+    try {
+      await db.deleteExpense(id, token);
+      await fetchAdminData(token);
+    } catch (err: any) {
+      alert(`Gagal menghapus pengeluaran: ${err.message}`);
+    }
+  };
+
+  // CRUD Produk Actions (Admin Only)
   const handleOpenAddModal = () => {
     setEditProduct(null);
     setProdName('');
@@ -321,13 +373,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // Chatbot Settings Handler (Admin Only)
+  // Chatbot & FAQ Handlers
   const handleSaveBotSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (userRole !== 'admin') {
-      alert('Akses Terbatas: Hanya Admin yang dapat mengubah pengaturan chatbot.');
-      return;
-    }
+    if (userRole !== 'admin') return;
     setIsSavingBotSettings(true);
     setBotSettingsSuccess('');
     try {
@@ -347,7 +396,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // FAQ CRUD Handlers (Admin Only for Save/Delete)
   const handleOpenAddFaqModal = () => {
     setEditFaq(null);
     setFaqKeyword('');
@@ -395,10 +443,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
   };
 
   const handleDeleteFaq = async (id: string) => {
-    if (userRole !== 'admin') {
-      alert('Akses Terbatas: Hanya Admin yang diperbolehkan menghapus FAQ.');
-      return;
-    }
+    if (userRole !== 'admin') return;
     if (!window.confirm('Apakah Anda yakin ingin menghapus FAQ ini?')) return;
     try {
       await db.deleteChatbotKnowledge(id, token);
@@ -408,7 +453,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // Tambah Staf Baru (Admin Only)
+  // Tambah Staf Baru
   const handleAddStaffAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     setStaffError('');
@@ -446,7 +491,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     }
   };
 
-  // 1. FORM LOGIN DUAL-ROLE (ADMIN & PEGAWAI)
+  // Cetak / Print Laporan
+  const handlePrintReport = () => {
+    window.print();
+  };
+
+  // 1. FORM LOGIN DUAL-ROLE
   if (!isLoggedIn) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '65vh', padding: '24px' }}>
@@ -468,11 +518,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             </div>
             <h2 style={{ fontSize: '1.6rem', marginBottom: '6px' }}>Portal Masuk Pengelola</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
-              TIARA BAKERY SAKO • Otorisasi Berbasis Peran (RBAC)
+              TIARA BAKERY SAKO • Analitik & Sistem Manajemen UMKM
             </p>
           </div>
 
-          {/* Quick Role Fill Buttons */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
             <button
               type="button"
@@ -485,11 +534,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                 backgroundColor: username === 'admin' ? 'var(--color-primary)' : 'transparent',
                 color: username === 'admin' ? 'white' : 'var(--color-primary)',
                 cursor: 'pointer',
-                fontWeight: 'bold',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px'
+                fontWeight: 'bold'
               }}
             >
               👑 Login Admin
@@ -505,11 +550,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                 backgroundColor: username === 'pegawai' ? '#0288D1' : 'transparent',
                 color: username === 'pegawai' ? 'white' : '#0288D1',
                 cursor: 'pointer',
-                fontWeight: 'bold',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px'
+                fontWeight: 'bold'
               }}
             >
               👨‍🍳 Login Pegawai
@@ -546,47 +587,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             </div>
 
             {loginError && (
-              <div
-                style={{
-                  backgroundColor: 'rgba(217, 83, 79, 0.1)',
-                  color: '#D9534F',
-                  padding: '10px 12px',
-                  borderRadius: '6px',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  lineHeight: '1.4'
-                }}
-              >
-                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              <div style={{ backgroundColor: 'rgba(217, 83, 79, 0.1)', color: '#D9534F', padding: '10px', borderRadius: '6px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={16} />
                 <span>{loginError}</span>
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="btn-primary"
-              style={{
-                width: '100%',
-                justifyContent: 'center',
-                padding: '12px',
-                fontSize: '1rem',
-                opacity: isLoading ? 0.7 : 1
-              }}
-            >
-              {isLoading ? 'Memverifikasi Sesi...' : (
-                <>
-                  Masuk ke Dasbor Sistem <Key size={16} />
-                </>
-              )}
+            <button type="submit" disabled={isLoading} className="btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '12px', fontSize: '1rem' }}>
+              {isLoading ? 'Memverifikasi...' : <>Masuk Sistem UMKM <Key size={16} /></>}
             </button>
           </form>
           
-          <div style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'left', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
-            <p style={{ fontWeight: 'bold', marginBottom: '4px' }}>🔑 Kredensial Demo Pengujian:</p>
-            <ul style={{ paddingLeft: '16px', margin: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div style={{ marginTop: '20px', fontSize: '0.75rem', color: 'var(--color-text-muted)', borderTop: '1px solid var(--color-border)', paddingTop: '16px' }}>
+            <p style={{ fontWeight: 'bold', marginBottom: '4px' }}>🔑 Kredensial Pengujian:</p>
+            <ul style={{ paddingLeft: '16px', margin: 0 }}>
               <li><strong>Admin (Owner)</strong>: <code>admin</code> / <code>adminTiara123!</code></li>
               <li><strong>Pegawai (Kasir)</strong>: <code>pegawai</code> / <code>pegawaiTiara123!</code></li>
             </ul>
@@ -597,23 +611,80 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
     );
   }
 
-  // Filter Order List
-  const filteredOrders = orders.filter(o => {
-    if (orderFilter === 'Semua') return true;
-    return o.status === orderFilter;
+  // Filter Order & Analitik Penjualan Berkala
+  const filteredOrders = orders.filter(o => orderFilter === 'Semua' || o.status === orderFilter);
+
+  // Filter Date Helper Laporan Berkala
+  const now = new Date();
+  const getFilteredTimeframeOrders = () => {
+    return orders.filter(o => {
+      if (o.status !== 'Selesai') return false; // Hanya hitung pesanan selesai sebagai pendapatan riil
+      const oDate = new Date(o.created_at);
+      if (reportTimeframe === 'today') {
+        return oDate.toDateString() === now.toDateString();
+      }
+      if (reportTimeframe === 'week') {
+        const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+        return oDate >= oneWeekAgo;
+      }
+      if (reportTimeframe === 'month') {
+        return oDate.getMonth() === now.getMonth() && oDate.getFullYear() === now.getFullYear();
+      }
+      if (reportTimeframe === 'year') {
+        return oDate.getFullYear() === now.getFullYear();
+      }
+      return true; // 'all'
+    });
+  };
+
+  const timeframeOrders = getFilteredTimeframeOrders();
+  const totalRevenue = timeframeOrders.reduce((sum, o) => sum + o.total_price, 0);
+
+  // Filter Expenses by timeframe
+  const timeframeExpenses = expenses.filter(e => {
+    const eDate = new Date(e.expense_date);
+    if (reportTimeframe === 'today') return eDate.toDateString() === now.toDateString();
+    if (reportTimeframe === 'week') {
+      const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+      return eDate >= oneWeekAgo;
+    }
+    if (reportTimeframe === 'month') return eDate.getMonth() === now.getMonth() && eDate.getFullYear() === now.getFullYear();
+    if (reportTimeframe === 'year') return eDate.getFullYear() === now.getFullYear();
+    return true;
   });
 
-  // Calculate POS Order Total
+  const totalExpenseAmount = timeframeExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const netProfit = totalRevenue - totalExpenseAmount;
+  const avgOrderValue = timeframeOrders.length > 0 ? Math.round(totalRevenue / timeframeOrders.length) : 0;
+
+  // Analitik Produk Terlaris (Best Seller)
+  const productSalesMap: { [key: string]: { name: string; qty: number; revenue: number } } = {};
+  timeframeOrders.forEach(o => {
+    o.items?.forEach(item => {
+      if (!productSalesMap[item.product_name]) {
+        productSalesMap[item.product_name] = { name: item.product_name, qty: 0, revenue: 0 };
+      }
+      productSalesMap[item.product_name].qty += item.quantity;
+      productSalesMap[item.product_name].revenue += item.price_at_purchase * item.quantity;
+    });
+  });
+
+  const bestSellingProducts = Object.values(productSalesMap).sort((a, b) => b.qty - a.qty);
+
+  // Detect Low Stock Products (<= 5)
+  const lowStockProducts = products.filter(p => p.stock <= 5);
+
+  // POS Total Calculation
   const posTotalCalculated = posCart.reduce((sum, item) => {
     const p = products.find(prod => prod.id === item.product_id);
     return sum + (p ? p.price * item.quantity : 0);
   }, 0);
 
-  // 2. DASBOR UTAMA BERBASIS PERAN (ADMIN & PEGAWAI)
+  // 2. DASBOR UTAMA UMKM (ADMIN & PEGAWAI)
   return (
     <div className="container" style={{ padding: '40px 24px', minHeight: '75vh' }}>
       
-      {/* Header Dashboard & Role Badge */}
+      {/* HEADER DASBOR & INDIKATOR HAK AKSES */}
       <div
         style={{
           display: 'flex',
@@ -621,49 +692,84 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
           alignItems: 'center',
           borderBottom: '2px solid var(--color-border)',
           paddingBottom: '20px',
-          marginBottom: '30px',
+          marginBottom: '24px',
           flexWrap: 'wrap',
           gap: '16px'
         }}
       >
         <div style={{ textAlign: 'left' }}>
-          <h2 style={{ fontSize: '1.8rem', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            Dasbor Pengelolaan
+          <h2 style={{ fontSize: '1.8rem', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', margin: 0 }}>
+            Dasbor Pengelolaan UMKM
             {userRole === 'admin' ? (
-              <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #8B0000, #4E0C0D)', color: 'white', borderRadius: '30px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #8B0000, #4E0C0D)', color: 'white', borderRadius: '30px', fontWeight: 'bold' }}>
                 👑 ADMINISTRATOR (OWNER)
               </span>
             ) : (
-              <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #0288D1, #01579B)', color: 'white', borderRadius: '30px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '0.8rem', padding: '4px 12px', background: 'linear-gradient(135deg, #0288D1, #01579B)', color: 'white', borderRadius: '30px', fontWeight: 'bold' }}>
                 👨‍🍳 STAF OPERASIONAL / KASIR
               </span>
             )}
           </h2>
-          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', margin: 0 }}>
+          <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', margin: '4px 0 0' }}>
             Selamat bekerja, <strong>{userDisplayName}</strong> di TIARA BAKERY SAKO
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {/* Quick POS button available for both Admin and Pegawai */}
-          <button
-            onClick={() => setShowPosModal(true)}
-            className="btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '10px 16px', backgroundColor: '#2E7D32' }}
-          >
+          <button onClick={() => setShowPosModal(true)} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem', padding: '10px 16px', backgroundColor: '#2E7D32' }}>
             <Store size={18} /> POS Kasir Cepat
           </button>
-
-          <button
-            onClick={handleLogout}
-            className="btn-outline"
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#D9534F', borderColor: '#D9534F', padding: '10px 16px' }}
-          >
+          <button onClick={handleLogout} className="btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#D9534F', borderColor: '#D9534F', padding: '10px 16px' }}>
             Keluar <LogOut size={16} />
           </button>
         </div>
       </div>
 
+      {/* BANNER PERINGATAN STOK KRITIS (LOW STOCK ALERT) */}
+      {lowStockProducts.length > 0 && (
+        <div
+          style={{
+            backgroundColor: '#FDEDEC',
+            border: '1px solid #FADBD8',
+            borderRadius: '12px',
+            padding: '14px 20px',
+            marginBottom: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            textAlign: 'left',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#78281F' }}>
+            <AlertTriangle size={24} style={{ color: '#D9534F', flexShrink: 0 }} />
+            <div>
+              <strong style={{ fontSize: '0.95rem' }}>⚠️ Peringatan Stok Kritis ({lowStockProducts.length} Produk Hampir Habis):</strong>
+              <p style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>
+                {lowStockProducts.map(p => `${p.name} (${p.stock} Pcs)`).join(', ')}. Harap segera buat jadwal pemanggangan/restock kue!
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('products')}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: '#D9534F',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+              fontWeight: 'bold'
+            }}
+          >
+            Update Stok Sekarang
+          </button>
+        </div>
+      )}
+
+      {/* DASHBOARD GRID NAVIGATION & TABS */}
       <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '30px' }} className="grid">
         
         {/* Navigation Sidebar */}
@@ -697,6 +803,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
           </button>
 
           <button
+            onClick={() => setActiveTab('analytics')}
+            className={`btn-secondary`}
+            style={{
+              justifyContent: 'flex-start',
+              width: '100%',
+              backgroundColor: activeTab === 'analytics' ? 'var(--color-primary)' : 'var(--color-card-cream)',
+              color: activeTab === 'analytics' ? 'white' : 'var(--color-primary)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <BarChart3 size={18} /> Analitik & Laporan Berkala
+          </button>
+
+          <button
+            onClick={() => setActiveTab('expenses')}
+            className={`btn-secondary`}
+            style={{
+              justifyContent: 'flex-start',
+              width: '100%',
+              backgroundColor: activeTab === 'expenses' ? 'var(--color-primary)' : 'var(--color-card-cream)',
+              color: activeTab === 'expenses' ? 'white' : 'var(--color-primary)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Wallet size={18} /> Pengelunaran Toko (HPP)
+          </button>
+
+          <button
             onClick={() => setActiveTab('chatbot')}
             className={`btn-secondary`}
             style={{
@@ -723,41 +857,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
           >
             <Terminal size={18} /> {userRole === 'admin' ? 'Log Audit & Akun Staf' : 'Info Akses Sistem'}
           </button>
-
-          {/* Info Hak Akses Peran */}
-          <div
-            style={{
-              marginTop: '20px',
-              backgroundColor: userRole === 'admin' ? 'rgba(78, 12, 13, 0.05)' : 'rgba(2, 136, 209, 0.08)',
-              padding: '14px',
-              borderRadius: '12px',
-              border: '1px solid var(--color-border)',
-              fontSize: '0.8rem',
-              color: 'var(--color-text-dark)'
-            }}
-          >
-            <h4 style={{ fontSize: '0.85rem', marginBottom: '6px', color: userRole === 'admin' ? 'var(--color-primary)' : '#0288D1' }}>
-              Hak Akses Peran Aktif:
-            </h4>
-            {userRole === 'admin' ? (
-              <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px', margin: 0 }}>
-                <li>✅ Full CRUD Produk & Katalog</li>
-                <li>✅ Manajemen Kelola Pesanan</li>
-                <li>✅ Manajemen Akun Staf Pegawai</li>
-                <li>✅ Audit Log & Konfigurasi AI</li>
-              </ul>
-            ) : (
-              <ul style={{ paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px', margin: 0 }}>
-                <li>✅ Pemrosesan Pesanan & POS Kasir</li>
-                <li>✅ Update Stok Produk Cepat</li>
-                <li>🔒 Hapus Produk/Pesanan Dibatasi</li>
-                <li>🔒 Konfigurasi Akun/Log Dibatasi</li>
-              </ul>
-            )}
-          </div>
         </div>
 
-        {/* Tab Contents */}
+        {/* Tab Content Area */}
         <div className="premium-card" style={{ padding: '24px', backgroundColor: 'var(--color-card-cream)' }}>
           
           {/* TAB 1: MANAJEMEN PESANAN & POS KASIR */}
@@ -784,11 +886,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                     <option value="Selesai">Selesai ({orders.filter(o => o.status === 'Selesai').length})</option>
                   </select>
 
-                  <button
-                    onClick={() => fetchAdminData(token)}
-                    className="btn-outline"
-                    style={{ padding: '6px 12px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
+                  <button onClick={() => fetchAdminData(token)} className="btn-outline" style={{ padding: '6px 12px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <RefreshCw size={14} /> Refresh
                   </button>
                 </div>
@@ -799,28 +897,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               ) : filteredOrders.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   {filteredOrders.map((o) => (
-                    <div
-                      key={o.id}
-                      style={{
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '12px',
-                        padding: '18px',
-                        backgroundColor: '#FFFDF9'
-                      }}
-                    >
-                      {/* Order Header */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'flex-start',
-                          borderBottom: '1px dashed var(--color-border)',
-                          paddingBottom: '12px',
-                          marginBottom: '12px',
-                          flexWrap: 'wrap',
-                          gap: '12px'
-                        }}
-                      >
+                    <div key={o.id} style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '18px', backgroundColor: '#FFFDF9' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px dashed var(--color-border)', paddingBottom: '12px', marginBottom: '12px', flexWrap: 'wrap', gap: '12px' }}>
                         <div>
                           <h4 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                             Pesanan #{o.id}
@@ -833,7 +911,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                           </span>
                         </div>
 
-                        {/* Status Switcher */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Ubah Status:</span>
                           <select
@@ -857,7 +934,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                         </div>
                       </div>
 
-                      {/* Customer Details */}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '0.88rem', marginBottom: '14px' }} className="grid">
                         <div>
                           <p style={{ margin: '0 0 4px' }}><strong>Pelanggan:</strong> {o.customer_name}</p>
@@ -869,7 +945,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                         </div>
                       </div>
 
-                      {/* Items Rincian */}
                       <div style={{ backgroundColor: 'var(--color-bg-cream)', padding: '12px', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
                         <h5 style={{ fontSize: '0.85rem', margin: '0 0 8px', color: 'var(--color-primary)' }}>Rincian Item Belanja:</h5>
                         <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
@@ -895,24 +970,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                   ))}
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-                  Belum ada pesanan masuk untuk kategori ini.
-                </div>
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>Belum ada pesanan masuk.</div>
               )}
             </div>
           )}
 
-          {/* TAB 2: KATALOG & MANAJEMEN STOK PRODUK */}
+          {/* TAB 2: KATALOG PRODUK & PENYESUAIAN STOK */}
           {activeTab === 'products' && (
             <div style={{ textAlign: 'left' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Katalog Produk & Penyesuaian Stok</h3>
                   <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
-                    {userRole === 'admin' ? 'Kelola produk penuh (Tambah, Edit, Hapus, & Update Stok)' : 'Staf dapat melihat katalog & memperbarui jumlah stok kue yang tersedia'}
+                    {userRole === 'admin' ? 'Kelola produk penuh (Tambah, Edit, Hapus, & Update Stok)' : 'Staf dapat melihat katalog & memperbarui jumlah stok kue'}
                   </p>
                 </div>
-
                 {userRole === 'admin' && (
                   <button onClick={handleOpenAddModal} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Plus size={16} /> Tambah Produk Baru
@@ -922,80 +994,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
                 {products.map((p) => (
-                  <div
-                    key={p.id}
-                    style={{
-                      border: '1px solid var(--color-border)',
-                      borderRadius: '12px',
-                      padding: '16px',
-                      backgroundColor: '#FFFDF9',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between'
-                    }}
-                  >
+                  <div key={p.id} style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '16px', backgroundColor: '#FFFDF9', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                     <div>
                       <div style={{ height: '140px', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px' }}>
                         <img src={p.image_url} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       </div>
-
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
                         <h4 style={{ margin: 0, fontSize: '1rem', color: 'var(--color-primary)' }}>{p.name}</h4>
                         <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'var(--color-bg-cream)', border: '1px solid var(--color-border)' }}>
                           {p.category}
                         </span>
                       </div>
-
                       <p style={{ fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--color-secondary-gold)', margin: '0 0 10px' }}>
                         Rp{p.price.toLocaleString()}
                       </p>
 
-                      {/* Quick Stock Controller */}
-                      <div style={{ backgroundColor: 'rgba(78, 12, 13, 0.04)', padding: '10px', borderRadius: '8px', marginBottom: '12px' }}>
+                      <div style={{ backgroundColor: p.stock <= 5 ? '#FDEDEC' : 'rgba(78, 12, 13, 0.04)', padding: '10px', borderRadius: '8px', marginBottom: '12px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                           <span style={{ fontSize: '0.85rem', fontWeight: 'bold' }}>Stok Tersedia:</span>
                           <span style={{ fontSize: '1rem', fontWeight: 'bold', color: p.stock <= 5 ? '#D9534F' : '#2E7D32' }}>
-                            {p.stock} Pcs
+                            {p.stock} Pcs {p.stock <= 5 && '⚠️'}
                           </span>
                         </div>
-
-                        {/* Quick adjustment buttons */}
                         <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            onClick={() => handleQuickStockUpdate(p.id, Math.max(0, p.stock - 1))}
-                            style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}
-                          >
-                            -1
-                          </button>
-                          <button
-                            onClick={() => handleQuickStockUpdate(p.id, p.stock + 1)}
-                            style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}
-                          >
-                            +1
-                          </button>
-                          <button
-                            onClick={() => handleQuickStockUpdate(p.id, p.stock + 5)}
-                            style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}
-                          >
-                            +5
-                          </button>
+                          <button onClick={() => handleQuickStockUpdate(p.id, Math.max(0, p.stock - 1))} style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>-1</button>
+                          <button onClick={() => handleQuickStockUpdate(p.id, p.stock + 1)} style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>+1</button>
+                          <button onClick={() => handleQuickStockUpdate(p.id, p.stock + 5)} style={{ flex: 1, padding: '4px', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid var(--color-border)', cursor: 'pointer' }}>+5</button>
                         </div>
                       </div>
                     </div>
 
                     {userRole === 'admin' ? (
                       <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-border)', paddingTop: '12px', marginTop: '10px' }}>
-                        <button
-                          onClick={() => handleOpenEditModal(p)}
-                          className="btn-outline"
-                          style={{ flex: 1, padding: '6px', fontSize: '0.8rem', justifyContent: 'center' }}
-                        >
+                        <button onClick={() => handleOpenEditModal(p)} className="btn-outline" style={{ flex: 1, padding: '6px', fontSize: '0.8rem', justifyContent: 'center' }}>
                           <Edit3 size={14} /> Edit Detail
                         </button>
-                        <button
-                          onClick={() => handleDeleteProduct(p.id)}
-                          style={{ padding: '6px 10px', backgroundColor: '#FDEDEC', color: '#D9534F', border: '1px solid #FADBD8', borderRadius: '6px', cursor: 'pointer' }}
-                        >
+                        <button onClick={() => handleDeleteProduct(p.id)} style={{ padding: '6px 10px', backgroundColor: '#FDEDEC', color: '#D9534F', border: '1px solid #FADBD8', borderRadius: '6px', cursor: 'pointer' }}>
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -1010,7 +1044,193 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             </div>
           )}
 
-          {/* TAB 3: CHATBOT AI & FAQ KNOWLEDGE BASE */}
+          {/* TAB 3: ANALITIK & LAPORAN BERKALA UMKM (NEW FITUR UTAMA) */}
+          {activeTab === 'analytics' && (
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.35rem', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BarChart3 size={24} style={{ color: 'var(--color-primary)' }} /> Laporan & Analitik Keuangan UMKM
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+                    Ringkasan performa penjualan, pengeluaran operasional, dan estimasi Laba Bersih toko
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {/* Filter Periode */}
+                  <select
+                    value={reportTimeframe}
+                    onChange={(e) => setReportTimeframe(e.target.value as any)}
+                    className="form-input"
+                    style={{ padding: '8px 14px', fontSize: '0.85rem', fontWeight: 'bold' }}
+                  >
+                    <option value="today">📅 Hari Ini</option>
+                    <option value="week">📅 7 Hari Terakhir</option>
+                    <option value="month">📅 Bulan Ini</option>
+                    <option value="year">📅 Tahun Ini</option>
+                    <option value="all">📅 Semua Waktu</option>
+                  </select>
+
+                  <button
+                    onClick={handlePrintReport}
+                    className="btn-outline"
+                    style={{ padding: '8px 14px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Printer size={16} /> Ekspor / Cetak Laporan
+                  </button>
+                </div>
+              </div>
+
+              {/* EXECUTIVE KPI SUMMARY CARDS */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '28px' }} className="grid">
+                {/* 1. Pendapatan Kotor */}
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '18px', backgroundColor: '#FFFDF9' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '6px' }}>
+                    <DollarSign size={18} style={{ color: 'var(--color-primary)' }} /> Pendapatan Kotor (Omzet)
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--color-primary)' }}>
+                    Rp{totalRevenue.toLocaleString()}
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>dari {timeframeOrders.length} pesanan selesai</span>
+                </div>
+
+                {/* 2. Pengeluaran Operasional */}
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '18px', backgroundColor: '#FFFDF9' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '6px' }}>
+                    <Wallet size={18} style={{ color: '#D9534F' }} /> Total Pengeluaran
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#D9534F' }}>
+                    Rp{totalExpenseAmount.toLocaleString()}
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>HPP bahan baku & toko</span>
+                </div>
+
+                {/* 3. Laba Bersih */}
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '18px', backgroundColor: netProfit >= 0 ? '#E8F5E9' : '#FDEDEC' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '6px' }}>
+                    <TrendingUp size={18} style={{ color: netProfit >= 0 ? '#2E7D32' : '#D9534F' }} /> Estimasi Laba Bersih
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: netProfit >= 0 ? '#2E7D32' : '#D9534F' }}>
+                    Rp{netProfit.toLocaleString()}
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: netProfit >= 0 ? '#2E7D32' : '#D9534F', fontWeight: 'bold' }}>
+                    {netProfit >= 0 ? 'Surplus Laba' : 'Defisit (Perlu Efisiensi)'}
+                  </span>
+                </div>
+
+                {/* 4. Rata-rata Nilai Transaksi */}
+                <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '18px', backgroundColor: '#FFFDF9' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--color-text-muted)', fontSize: '0.8rem', marginBottom: '6px' }}>
+                    <FileText size={18} style={{ color: '#0288D1' }} /> Rata-Rata Transaksi
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#0288D1' }}>
+                    Rp{avgOrderValue.toLocaleString()}
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>per transaksi pelanggan</span>
+                </div>
+              </div>
+
+              {/* TABLE PRODUK TERLARIS (BEST SELLING PRODUCTS) */}
+              <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', padding: '20px', backgroundColor: '#FFFDF9', marginBottom: '28px' }}>
+                <h4 style={{ fontSize: '1.1rem', margin: '0 0 16px', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Award size={20} /> Produk Paling Terlaris (Best Sellers)
+                </h4>
+
+                {bestSellingProducts.length > 0 ? (
+                  <table style={{ width: '100%', fontSize: '0.88rem', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--color-border)', textAlign: 'left', color: 'var(--color-text-muted)' }}>
+                        <th style={{ padding: '8px' }}># Peringkat</th>
+                        <th style={{ padding: '8px' }}>Nama Produk</th>
+                        <th style={{ padding: '8px', textAlign: 'center' }}>Total Terjual</th>
+                        <th style={{ padding: '8px', textAlign: 'right' }}>Total Kontribusi Omzet</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bestSellingProducts.map((p, idx) => (
+                        <tr key={p.name} style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
+                          <td style={{ padding: '10px 8px', fontWeight: 'bold' }}>#{idx + 1}</td>
+                          <td style={{ padding: '10px 8px' }}><strong>{p.name}</strong></td>
+                          <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                            <span style={{ padding: '2px 10px', backgroundColor: 'rgba(78,12,13,0.1)', color: 'var(--color-primary)', borderRadius: '12px', fontWeight: 'bold' }}>
+                              {p.qty} Pcs
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 'bold', color: 'var(--color-secondary-gold)' }}>
+                            Rp{p.revenue.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div style={{ padding: '20px', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                    Belum ada data transaksi selesai pada periode ini.
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 4: PENGELUARAN OPERASIONAL TOKO (EXPENSES) */}
+          {activeTab === 'expenses' && (
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.35rem', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Wallet size={22} style={{ color: 'var(--color-primary)' }} /> Pencatatan Pengeluaran & HPP Toko
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+                    Catat pembelian bahan baku (terigu, keju), operasional (kemasan/listrik), dan gaji staf untuk akurasi Laba Bersih UMKM
+                  </p>
+                </div>
+
+                <button onClick={() => setShowExpenseModal(true)} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Plus size={16} /> Catat Pengeluaran Baru
+                </button>
+              </div>
+
+              {/* TABLE EXPENSES */}
+              <div style={{ border: '1px solid var(--color-border)', borderRadius: '12px', overflow: 'hidden', backgroundColor: '#FFFDF9' }}>
+                <table style={{ width: '100%', fontSize: '0.88rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: 'var(--color-primary)', color: 'white', textAlign: 'left' }}>
+                      <th style={{ padding: '12px' }}>Tanggal</th>
+                      <th style={{ padding: '12px' }}>Kategori</th>
+                      <th style={{ padding: '12px' }}>Keterangan Pengeluaran</th>
+                      <th style={{ padding: '12px', textAlign: 'right' }}>Nominal (Rp)</th>
+                      <th style={{ padding: '12px', textAlign: 'center' }}>Tindakan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expenses.map((exp) => (
+                      <tr key={exp.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td style={{ padding: '12px' }}>{new Date(exp.expense_date).toLocaleDateString('id-ID')}</td>
+                        <td style={{ padding: '12px' }}>
+                          <span style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: '12px', fontWeight: 'bold', backgroundColor: exp.category === 'Bahan Baku' ? '#E8F5E9' : exp.category === 'Operasional Toko' ? '#E3F2FD' : '#FFF3E0', color: exp.category === 'Bahan Baku' ? '#2E7D32' : exp.category === 'Operasional Toko' ? '#1565C0' : '#E65100' }}>
+                            {exp.category}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px' }}><strong>{exp.description}</strong></td>
+                        <td style={{ padding: '12px', textAlign: 'right', fontWeight: 'bold', color: '#D9534F' }}>
+                          Rp{exp.amount.toLocaleString()}
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <button onClick={() => handleDeleteExpense(exp.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#D9534F' }}>
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: CHATBOT AI & FAQ */}
           {activeTab === 'chatbot' && (
             <div style={{ textAlign: 'left' }}>
               {userRole === 'pegawai' && (
@@ -1020,49 +1240,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ fontSize: '1.35rem', margin: 0 }}>Pengaturan Pelayan Virtual "Tiara"</h3>
-              </div>
+              <h3 style={{ fontSize: '1.35rem', marginBottom: '20px' }}>Pengaturan Pelayan Virtual "Tiara"</h3>
 
-              {/* Bot Persona Form */}
               <form onSubmit={handleSaveBotSettings} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
                 <div>
                   <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Nama Pelayan Virtual</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={botNameInput}
-                    onChange={(e) => setBotNameInput(e.target.value)}
-                    disabled={userRole !== 'admin'}
-                  />
+                  <input type="text" className="form-input" value={botNameInput} onChange={(e) => setBotNameInput(e.target.value)} disabled={userRole !== 'admin'} />
                 </div>
-
                 <div>
                   <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Pesan Menyapa Awal (Welcome Message)</label>
-                  <textarea
-                    className="form-input"
-                    rows={3}
-                    value={welcomeMessageInput}
-                    onChange={(e) => setWelcomeMessageInput(e.target.value)}
-                    disabled={userRole !== 'admin'}
-                  />
+                  <textarea className="form-input" rows={3} value={welcomeMessageInput} onChange={(e) => setWelcomeMessageInput(e.target.value)} disabled={userRole !== 'admin'} />
                 </div>
-
                 <div>
                   <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Pesan Jawaban Default (Fallback Message)</label>
-                  <textarea
-                    className="form-input"
-                    rows={3}
-                    value={defaultFallbackInput}
-                    onChange={(e) => setDefaultFallbackInput(e.target.value)}
-                    disabled={userRole !== 'admin'}
-                  />
+                  <textarea className="form-input" rows={3} value={defaultFallbackInput} onChange={(e) => setDefaultFallbackInput(e.target.value)} disabled={userRole !== 'admin'} />
                 </div>
-
-                {botSettingsSuccess && (
-                  <div style={{ color: 'var(--color-success-green)', fontSize: '0.85rem', fontWeight: 'bold' }}>{botSettingsSuccess}</div>
-                )}
-
+                {botSettingsSuccess && <div style={{ color: 'var(--color-success-green)', fontSize: '0.85rem', fontWeight: 'bold' }}>{botSettingsSuccess}</div>}
                 {userRole === 'admin' && (
                   <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isSavingBotSettings}>
                     {isSavingBotSettings ? 'Menyimpan...' : 'Simpan Pengaturan Chatbot'}
@@ -1072,7 +1265,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
 
               <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', margin: '24px 0' }} />
 
-              {/* FAQ Knowledge Table */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                 <h4 style={{ fontSize: '1.1rem', margin: 0 }}>Basis Pengetahuan FAQ Chatbot ({chatbotKnowledge.length})</h4>
                 {userRole === 'admin' && (
@@ -1104,7 +1296,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
             </div>
           )}
 
-          {/* TAB 4: LOG AUDIT KEAMANAN & AKUN STAF (KHUSUS ADMIN) */}
+          {/* TAB 6: AUDIT KEAMANAN & AKUN STAF */}
           {activeTab === 'security' && (
             <div style={{ textAlign: 'left' }}>
               {userRole !== 'admin' ? (
@@ -1112,7 +1304,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                   <Lock size={48} style={{ color: 'var(--color-primary)', marginBottom: '16px' }} />
                   <h3 style={{ fontSize: '1.3rem' }}>Akses Khusus Administrator (Owner)</h3>
                   <p style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', maxWidth: '400px', margin: '8px auto 0' }}>
-                    Log audit keamanan dan pengelolaan akun staf pegawai hanya dapat diakses oleh Administrator dengan kredensial penuh.
+                    Log audit keamanan dan pengelolaan akun staf pegawai hanya dapat diakses oleh Administrator.
                   </p>
                 </div>
               ) : (
@@ -1124,7 +1316,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                     </button>
                   </div>
 
-                  {/* Staff Table */}
                   <div style={{ marginBottom: '32px', border: '1px solid var(--color-border)', borderRadius: '8px', overflow: 'hidden' }}>
                     <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
                       <thead>
@@ -1159,7 +1350,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                   </div>
 
                   <h3 style={{ fontSize: '1.2rem', marginBottom: '12px' }}>Audit Log Aktivitas Keamanan ({securityLogs.length})</h3>
-                  <div style={{ maxHeight: '350px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '12px', backgroundColor: '#1E1E1E', color: '#00FF66', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                  <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '12px', backgroundColor: '#1E1E1E', color: '#00FF66', fontFamily: 'monospace', fontSize: '0.78rem' }}>
                     {securityLogs.map((log) => (
                       <div key={log.id} style={{ marginBottom: '6px', borderBottom: '1px dashed #333', paddingBottom: '4px' }}>
                         [{new Date(log.timestamp).toLocaleTimeString()}] [{log.status}] [{log.eventType}] - {log.detail} (IP: {log.ipSimulated})
@@ -1200,11 +1391,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }} className="grid">
                 <div>
                   <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Metode Penyerahan</label>
-                  <select
-                    className="form-input"
-                    value={posDeliveryMethod}
-                    onChange={(e) => setPosDeliveryMethod(e.target.value as any)}
-                  >
+                  <select className="form-input" value={posDeliveryMethod} onChange={(e) => setPosDeliveryMethod(e.target.value as any)}>
                     <option value="Ambil Sendiri">Ambil Sendiri di Toko</option>
                     <option value="Kirim ke Rumah">Kirim ke Rumah (Kurir)</option>
                   </select>
@@ -1212,14 +1399,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
                 {posDeliveryMethod === 'Kirim ke Rumah' && (
                   <div>
                     <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Alamat Pengiriman</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="Alamat lengkap tujuan"
-                      value={posAddress}
-                      onChange={(e) => setPosAddress(e.target.value)}
-                      required
-                    />
+                    <input type="text" className="form-input" placeholder="Alamat lengkap" value={posAddress} onChange={(e) => setPosAddress(e.target.value)} required />
                   </div>
                 )}
               </div>
@@ -1259,6 +1439,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ products, refreshProduct
 
               <button type="submit" className="btn-primary" style={{ padding: '12px', justifyContent: 'center' }}>
                 Proses Transaksi Kasir POS
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CATAT PENGELUARAN BARU */}
+      {showExpenseModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="premium-card" style={{ width: '100%', maxWidth: '480px', padding: '24px', textAlign: 'left' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Wallet size={20} /> Catat Pengeluaran Operasional
+              </h3>
+              <button onClick={() => setShowExpenseModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+
+            <form onSubmit={handleSaveExpense} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Kategori Pengeluaran</label>
+                <select className="form-input" value={expCategory} onChange={(e) => setExpCategory(e.target.value as ExpenseCategory)}>
+                  <option value="Bahan Baku">Bahan Baku (Terigu, Mentega, Cokelat)</option>
+                  <option value="Operasional Toko">Operasional Toko (Listrik, Plastik/Dus)</option>
+                  <option value="Gaji/Bonus Staf">Gaji / Bonus Staf</option>
+                  <option value="Lain-lain">Lain-lain</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Keterangan Rincian Pengeluaran</label>
+                <input type="text" className="form-input" placeholder="contoh: Pembelian Tepung Terigu 25kg" value={expDescription} onChange={(e) => setExpDescription(e.target.value)} required />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }} className="grid">
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Nominal (Rp)</label>
+                  <input type="number" className="form-input" value={expAmount} onChange={(e) => setExpAmount(Number(e.target.value))} required />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Tanggal Transaksi</label>
+                  <input type="date" className="form-input" value={expDate} onChange={(e) => setExpDate(e.target.value)} required />
+                </div>
+              </div>
+
+              {expError && <div style={{ color: '#D9534F', fontSize: '0.8rem' }}>{expError}</div>}
+
+              <button type="submit" className="btn-primary" style={{ justifyContent: 'center', padding: '12px' }}>
+                Simpan Catatan Pengeluaran
               </button>
             </form>
           </div>

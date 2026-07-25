@@ -2,7 +2,7 @@
 -- Prioritas Keamanan: Row-Level Security (RLS) diaktifkan sejak awal.
 
 -- =========================================================================
--- 1. TABEL UTAMA (PRODUCTS, ORDERS, ORDER_ITEMS, CHATBOT SETTINGS & KNOWLEDGE)
+-- 1. TABEL UTAMA (PRODUCTS, ORDERS, ORDER_ITEMS, CHATBOT, USERS & EXPENSES)
 -- =========================================================================
 
 -- 1.1 Tabel Produk
@@ -56,9 +56,38 @@ CREATE TABLE IF NOT EXISTS public.chatbot_knowledge (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 1.6 Tabel Akun Pengelola (User Accounts: Admin & Pegawai)
+CREATE TABLE IF NOT EXISTS public.user_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'pegawai')),
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 1.7 Tabel Pengeluaran Operasional Toko (Expenses / HPP UMKM)
+CREATE TABLE IF NOT EXISTS public.expenses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    category TEXT NOT NULL CHECK (category IN ('Bahan Baku', 'Operasional Toko', 'Gaji/Bonus Staf', 'Lain-lain')),
+    description TEXT NOT NULL,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    expense_date TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 
 -- =========================================================================
--- 2. KEAMANAN: ROW LEVEL SECURITY (RLS)
+-- 2. INDEKS PERFORMA KEUANGAN & LAPORAN
+-- =========================================================================
+
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON public.orders(created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(status);
+CREATE INDEX IF NOT EXISTS idx_expenses_expense_date ON public.expenses(expense_date);
+
+
+-- =========================================================================
+-- 3. KEAMANAN: ROW LEVEL SECURITY (RLS)
 -- =========================================================================
 
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
@@ -66,6 +95,8 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chatbot_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chatbot_knowledge ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.expenses ENABLE ROW LEVEL SECURITY;
 
 -- Reset kebijakan jika sudah ada sebelumnya (Idempotent)
 DROP POLICY IF EXISTS "Siapa saja bisa melihat produk" ON public.products;
@@ -80,73 +111,36 @@ DROP POLICY IF EXISTS "Siapa saja bisa membaca pengaturan chatbot" ON public.cha
 DROP POLICY IF EXISTS "Hanya Admin yang bisa mengelola pengaturan chatbot" ON public.chatbot_settings;
 DROP POLICY IF EXISTS "Siapa saja bisa membaca pengetahuan chatbot" ON public.chatbot_knowledge;
 DROP POLICY IF EXISTS "Hanya Admin yang bisa mengelola pengetahuan chatbot" ON public.chatbot_knowledge;
+DROP POLICY IF EXISTS "Hanya Admin yang bisa mengelola akun pengguna" ON public.user_accounts;
+DROP POLICY IF EXISTS "Admin dan Staf bisa mengelola pengeluaran" ON public.expenses;
 
 -- Kebijakan untuk Tabel PRODUCTS
-CREATE POLICY "Siapa saja bisa melihat produk" 
-ON public.products FOR SELECT 
-USING (true);
-
-CREATE POLICY "Hanya Admin yang bisa CRUD produk" 
-ON public.products FOR ALL 
-TO authenticated 
-USING (auth.role() = 'authenticated')
-WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Siapa saja bisa melihat produk" ON public.products FOR SELECT USING (true);
+CREATE POLICY "Hanya Admin yang bisa CRUD produk" ON public.products FOR ALL TO authenticated USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
 
 -- Kebijakan untuk Tabel ORDERS
-CREATE POLICY "Pelanggan dapat membuat pesanan baru" 
-ON public.orders FOR INSERT 
-WITH CHECK (true);
-
-CREATE POLICY "Pelanggan dapat melacak pesanan berdasarkan ID" 
-ON public.orders FOR SELECT 
-USING (true);
-
-CREATE POLICY "Hanya Admin yang bisa mengelola semua pesanan" 
-ON public.orders FOR ALL 
-TO authenticated 
-USING (auth.role() = 'authenticated')
-WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Pelanggan dapat membuat pesanan baru" ON public.orders FOR INSERT WITH CHECK (true);
+CREATE POLICY "Pelanggan dapat melacak pesanan berdasarkan ID" ON public.orders FOR SELECT USING (true);
+CREATE POLICY "Hanya Admin yang bisa mengelola semua pesanan" ON public.orders FOR ALL TO authenticated USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
 
 -- Kebijakan untuk Tabel ORDER_ITEMS
-CREATE POLICY "Siapa saja dapat menambahkan item pesanan" 
-ON public.order_items FOR INSERT 
-WITH CHECK (true);
+CREATE POLICY "Siapa saja dapat menambahkan item pesanan" ON public.order_items FOR INSERT WITH CHECK (true);
+CREATE POLICY "Siapa saja dapat membaca item pesanan" ON public.order_items FOR SELECT USING (true);
+CREATE POLICY "Hanya Admin yang bisa mengelola item pesanan" ON public.order_items FOR ALL TO authenticated USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
 
-CREATE POLICY "Siapa saja dapat membaca item pesanan" 
-ON public.order_items FOR SELECT 
-USING (true);
+-- Kebijakan untuk Tabel CHATBOT_SETTINGS & KNOWLEDGE
+CREATE POLICY "Siapa saja bisa membaca pengaturan chatbot" ON public.chatbot_settings FOR SELECT USING (true);
+CREATE POLICY "Hanya Admin yang bisa mengelola pengaturan chatbot" ON public.chatbot_settings FOR ALL TO authenticated USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Siapa saja bisa membaca pengetahuan chatbot" ON public.chatbot_knowledge FOR SELECT USING (true);
+CREATE POLICY "Hanya Admin yang bisa mengelola pengetahuan chatbot" ON public.chatbot_knowledge FOR ALL TO authenticated USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
 
-CREATE POLICY "Hanya Admin yang bisa mengelola item pesanan" 
-ON public.order_items FOR ALL 
-TO authenticated 
-USING (auth.role() = 'authenticated')
-WITH CHECK (auth.role() = 'authenticated');
-
--- Kebijakan untuk Tabel CHATBOT_SETTINGS
-CREATE POLICY "Siapa saja bisa membaca pengaturan chatbot"
-ON public.chatbot_settings FOR SELECT
-USING (true);
-
-CREATE POLICY "Hanya Admin yang bisa mengelola pengaturan chatbot"
-ON public.chatbot_settings FOR ALL
-TO authenticated
-USING (auth.role() = 'authenticated')
-WITH CHECK (auth.role() = 'authenticated');
-
--- Kebijakan untuk Tabel CHATBOT_KNOWLEDGE
-CREATE POLICY "Siapa saja bisa membaca pengetahuan chatbot"
-ON public.chatbot_knowledge FOR SELECT
-USING (true);
-
-CREATE POLICY "Hanya Admin yang bisa mengelola pengetahuan chatbot"
-ON public.chatbot_knowledge FOR ALL
-TO authenticated
-USING (auth.role() = 'authenticated')
-WITH CHECK (auth.role() = 'authenticated');
+-- Kebijakan untuk USER_ACCOUNTS & EXPENSES
+CREATE POLICY "Hanya Admin yang bisa mengelola akun pengguna" ON public.user_accounts FOR ALL TO authenticated USING (auth.role() = 'authenticated');
+CREATE POLICY "Admin dan Staf bisa mengelola pengeluaran" ON public.expenses FOR ALL TO authenticated USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
 
 
 -- =========================================================================
--- 3. DATA AWAL (SEED DATA)
+-- 4. DATA AWAL (SEED DATA)
 -- =========================================================================
 
 -- Seed Data Produk
@@ -159,10 +153,24 @@ INSERT INTO public.products (name, description, price, category, stock, image_ur
 ('Kue Mangkok Merah', 'Kue basah kukus tradisional yang merekah manis dan lembut.', 3500, 'Kue Basah', 40, 'https://images.unsplash.com/photo-1550617931-e17a7b70dce2?auto=format&fit=crop&q=80&w=400'),
 ('Nastar Klasik Wisman', 'Kue kering nastar lembut dengan selai nanas asli home-made berlapis mentega Wisman.', 85000, 'Kue Kering', 25, 'https://images.unsplash.com/photo-1612240498936-65f5101365d2?auto=format&fit=crop&q=80&w=400'),
 ('Kastengel Keju Edam', 'Kue kering keju yang renyah dan asin gurih khas keju Edam Belanda.', 90000, 'Kue Kering', 20, 'https://images.unsplash.com/photo-1590080875515-8a3a8dc5735e?auto=format&fit=crop&q=80&w=400'),
-('Kue Semprit Sagu', 'Kue kering sagu keju klasik yang lumer di mulut.', 65000, 'Kue Kering', 30, 'https://images.unsplash.com/photo-1558961309-dbdf717a1e4d?auto=format&fit=crop&q=80&w=400'),
+('Kue Semprit Sagu', 'Kue kering sagu keju klasik meledak manis di mulut.', 65000, 'Kue Kering', 30, 'https://images.unsplash.com/photo-1558961309-dbdf717a1e4d?auto=format&fit=crop&q=80&w=400'),
 ('Risoles Rogout Ayam', 'Jajanan pasar berkulit renyah dengan isian sayur dan ayam rogout creamy.', 4500, 'Jajanan Pasar', 70, 'https://images.unsplash.com/photo-1541532713592-79a0317b6b77?auto=format&fit=crop&q=80&w=400'),
 ('Pastel Bihun Telur', 'Pastel renyah berisi sayur, bihun, dan potongan telur rebus.', 4000, 'Jajanan Pasar', 65, 'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&q=80&w=400'),
 ('Kroket Kentang Daging', 'Kroket kentang lembut berlapis tepung roti dengan isian daging sapi cincang.', 5000, 'Jajanan Pasar', 50, 'https://images.unsplash.com/photo-1562967914-608f82629710?auto=format&fit=crop&q=80&w=400');
+
+-- Seed Data User Accounts (Admin & Pegawai)
+INSERT INTO public.user_accounts (username, name, role, password_hash) VALUES
+('admin', 'Administrator (Owner)', 'admin', 'e8d1a1ca60cb46dc1e7372cf931b6cc8f07cd7fa8fb3c2fb67c69ffb1dc6a9db'),
+('pegawai', 'Budi (Staf Kasir)', 'pegawai', 'a587eeedef2ebfdfa40c62ff92429a1b154a4f8d22bb425c2ee035c9118e6cb0')
+ON CONFLICT (username) DO NOTHING;
+
+-- Seed Data Pengeluaran Operasional Toko (Expenses)
+INSERT INTO public.expenses (category, description, amount, expense_date) VALUES
+('Bahan Baku', 'Pembelian Tepung Terigu Segitiga Biru 25kg & Mentega Wisman', 450000, NOW() - INTERVAL '2 days'),
+('Bahan Baku', 'Pembelian Cokelat Belgia & Keju Cheddar 5kg', 380000, NOW() - INTERVAL '1 days'),
+('Operasional Toko', 'Pembelian Kotak Kemasan & Plastik Tiara Bakery', 150000, NOW() - INTERVAL '3 days'),
+('Gaji/Bonus Staf', 'Bonus Harian Staf Kasir & Pemanggang Roti', 200000, NOW() - INTERVAL '1 days')
+ON CONFLICT DO NOTHING;
 
 -- Seed Data Chatbot Settings
 INSERT INTO public.chatbot_settings ("botName", "welcomeMessage", "defaultFallback") VALUES
